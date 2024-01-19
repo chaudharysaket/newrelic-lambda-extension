@@ -142,6 +142,7 @@ func tryLicenseKeyFromSecret(ctx context.Context, secretId string) (string, erro
 
 	secretValueOutput, err := secrets.GetSecretValueWithContext(ctx, &secretValueInput)
 	if err != nil {
+		util.Debugf("Error fetching secret '%s' from Secrets Manager: %v\n", secretId, err)
 		return "", err
 	}
 
@@ -155,6 +156,7 @@ func tryLicenseKeyFromSSMParameter(ctx context.Context, parameterName string) (s
 
 	parameterValueOutput, err := ssmClient.GetParameterWithContext(ctx, &parameterValueInput)
 	if err != nil {
+		util.Debugf("Error fetching secret '%s' from SSM Parameter Store: %v\n", parameterName, err)
 		return "", err
 	}
 
