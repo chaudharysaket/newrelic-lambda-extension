@@ -9,6 +9,7 @@ jobs:
   releases-matrix:
     name: Release Zip
     runs-on: ubuntu-latest
+    container: ubuntu:20.04
     strategy:
       matrix:
         make_directive: [zip-x86_64, zip-arm64]
