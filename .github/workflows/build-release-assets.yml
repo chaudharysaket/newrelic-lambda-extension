@@ -92,6 +92,6 @@ jobs:
           files: /tmp/newrelic-lambda-extension.arm64.zip
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          name: "Experimenatal Extension ${{ github.ref_name }}"
+          name: "newrelic-lambda-extension ${{ github.ref_name }}"
           draft: false
           prerelease: false
