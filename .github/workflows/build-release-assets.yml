@@ -51,7 +51,7 @@ jobs:
     container:
       image: cimg/go:1.19
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    # if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v3
       - name: Build and archive x86_64 distribution
@@ -76,7 +76,7 @@ jobs:
     container:
       image: cimg/go:1.19
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    # if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v3
       - name: Build and archive arm distribution
