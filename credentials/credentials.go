@@ -75,6 +75,7 @@ func IsSecretConfigured(ctx context.Context, conf *config.Configuration) bool {
 
 	_, err := secrets.GetSecretValueWithContext(ctx, &secretValueInput)
 	if err != nil {
+		util.Debugln("Error retrieving secret from Secrets Manager: ", err.Error())
 		return false
 	}
 
@@ -88,6 +89,7 @@ func IsSSMParameterConfigured(ctx context.Context, conf *config.Configuration) b
 
 	_, err := tryLicenseKeyFromSSMParameter(ctx, parameterName)
 	if err != nil {
+		util.Debugln("Error retrieving secret from SSM parameter: ", err.Error())
 		return false
 	}
 
