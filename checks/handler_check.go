@@ -16,7 +16,7 @@ type handlerConfigs struct {
 	conf        *config.Configuration
 }
 
-var handlerPath = "/var/task"
+var handlerPath = util.GetEnvOrDefault("LAMBDA_TASK_ROOT", "/var/task")
 
 func handlerCheck(ctx context.Context, conf *config.Configuration, reg *api.RegistrationResponse, r runtimeConfig) error {
 	if r.language != "" {
@@ -56,7 +56,7 @@ func (r runtimeConfig) getTrueHandler(h handlerConfigs) string {
 		if esm == "true" {
 			return h.handlerName
 		}
-		if util.PathExists("/.dockerenv") {
+		if isDockerEnvironment() {
 			return h.handlerName
 		}
 	}
@@ -77,4 +77,10 @@ func removePathMethodName(p string) string {
 func pathFormatter(functionHandler string, fileType string) string {
 	p := fmt.Sprintf("%s/%s.%s", handlerPath, functionHandler, fileType)
 	return p
+}
+
+func isDockerEnvironment() bool {
+	_, dockerHost := os.LookupEnv("DOCKER_HOST")
+	_, dockerCgroup := os.LookupEnv("container")
+	return dockerHost || dockerCgroup
 }

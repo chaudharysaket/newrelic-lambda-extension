@@ -34,3 +34,10 @@ func AnyEnvVarsExistString(keys []string) string {
 
 	return ""
 }
+
+func GetEnvOrDefault(key string, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
+}
