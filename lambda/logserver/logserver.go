@@ -140,6 +140,7 @@ func (ls *LogServer) handler(res http.ResponseWriter, req *http.Request) {
 		case "platform.report":
 			metricString := ""
 			requestId := ""
+			util.Debugf("platform log from platform.report : %v", event.Record)
 			switch event.Record.(type) {
 			case map[string]interface{}:
 				record := event.Record.(map[string]interface{})

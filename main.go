@@ -137,6 +137,11 @@ func main() {
 
 	// Run startup checks
 	go func() {
+		if conf.StartUpCheck == "all" {
+			// avoid all checks
+			util.Logf("Bypassing all checks")
+			return
+		}
 		checks.RunChecks(ctx, conf, registrationResponse, telemetryClient)
 	}()
 
@@ -154,7 +159,7 @@ func main() {
 
 	util.Logf("New Relic Extension shutting down after %v events\n", eventCounter)
 
-	pollLogServer(logServer, batch)
+	pollLogServer(logServer, batch, "Extension shutdown Logs")
 	err = logServer.Close()
 	if err != nil {
 		util.Logln("Error shutting down Log API server", err)
@@ -273,7 +278,7 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 			// Before we begin to await telemetry, harvest and ship. Ripe telemetry will mostly be handled here. Even that is a
 			// minority of invocations. Putting this here lets us run the HTTP request to send to NR in parallel with the Lambda
 			// handler, reducing or eliminating our latency impact.
-			pollLogServer(logServer, batch)
+			pollLogServer(logServer, batch, "mainLoop Ripe telemetry")
 			shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient)
 
 			select {
@@ -295,7 +300,7 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 
 				// Opportunity for an aggressive harvest, in which case, we definitely want to wait for the HTTP POST
 				// to complete. Mostly, nothing really happens here.
-				pollLogServer(logServer, batch)
+				pollLogServer(logServer, batch, "mainLoop")
 				shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient)
 			}
 
@@ -305,11 +310,20 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 }
 
 // pollLogServer polls for platform logs, and annotates telemetry
-func pollLogServer(logServer *logserver.LogServer, batch *telemetry.Batch) {
+func pollLogServer(logServer *logserver.LogServer, batch *telemetry.Batch, callingFunction string) {
+	util.Debugf("Platform logServer Called by %s", callingFunction)
 	for _, platformLog := range logServer.PollPlatformChannel() {
+		util.Debugf("Platform log: %s", string(platformLog.Content))
 		inv := batch.AddTelemetry(platformLog.RequestID, platformLog.Content)
 		if inv == nil {
 			util.Debugf("Skipping platform log for request %v", platformLog.RequestID)
+			eventStart := time.Now()
+			batch.AddInvocation(platformLog.RequestID, eventStart)
+			inv := batch.AddTelemetry(platformLog.RequestID, platformLog.Content)
+			if inv == nil {
+				util.Logf("Failed to add telemetry for request %v", lastRequestId)
+			}
+			util.Logf("successfully added telemetry for request %v", platformLog.RequestID)
 		}
 	}
 }

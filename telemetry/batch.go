@@ -67,6 +67,8 @@ func (b *Batch) AddTelemetry(requestId string, telemetry []byte) *Invocation {
 		}
 		return inv
 	}
+	util.Debugf("No invocation found for request ID %s\n", requestId)
+	util.Debugf("Current invocations: %v\n", b.invocations)
 	return nil
 }
 

@@ -21,6 +21,7 @@ var EmptyNRWrapper = "Undefined"
 type Configuration struct {
 	TestingOverride            bool // ignores envioronment specific details when running unit tests
 	ExtensionEnabled           bool
+	StartUpCheck               string
 	LogsEnabled                bool
 	SendFunctionLogs           bool
 	CollectTraceID             bool
@@ -39,6 +40,7 @@ type Configuration struct {
 
 func ConfigurationFromEnvironment() *Configuration {
 	nrEnabledStr, nrEnabledOverride := os.LookupEnv("NEW_RELIC_ENABLED")
+	nrStartupCheckStr, nrStartupCheckOverride := os.LookupEnv("NEW_RELIC_STARTUP_CHECK")
 	nrEnabledRubyStr, nrEnabledRubyOverride := os.LookupEnv("NEW_RELIC_AGENT_ENABLED")
 	enabledStr, extensionEnabledOverride := os.LookupEnv("NEW_RELIC_LAMBDA_EXTENSION_ENABLED")
 	licenseKey, lkOverride := os.LookupEnv("NEW_RELIC_LICENSE_KEY")
@@ -101,6 +103,10 @@ func ConfigurationFromEnvironment() *Configuration {
 
 	if teOverride {
 		ret.TelemetryEndpoint = telemetryEndpoint
+	}
+
+	if nrStartupCheckOverride {
+		ret.StartUpCheck = nrStartupCheckStr
 	}
 
 	if leOverride {

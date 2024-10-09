@@ -18,11 +18,12 @@ type LogSender interface {
 }
 
 /// Register checks here
-var checks = []checkFn{
-	agentVersionCheck,
-	handlerCheck,
-	sanityCheck,
-	vendorCheck,
+
+var checks = map[string]checkFn{
+    "agentversion": agentVersionCheck, 
+    "handler":       handlerCheck,
+    "sanity":        sanityCheck, 
+    "vendor":        vendorCheck, 
 }
 
 func RunChecks(ctx context.Context, conf *config.Configuration, reg *api.RegistrationResponse, logSender LogSender) {
@@ -32,8 +33,15 @@ func RunChecks(ctx context.Context, conf *config.Configuration, reg *api.Registr
 		util.Logln(errLog)
 	}
 
-	for _, check := range checks {
+	for name, check := range checks {
+		// Time where we start the check 
+		if name == conf.StartUpCheck {
+			fmt.Printf("Bypassing check %s\n", name)
+			continue
+		}
+		fmt.Printf("Running check %s\n", name)
 		runCheck(ctx, conf, reg, runtimeConfig, logSender, check)
+		// Time where we end the check
 	}
 }
 
