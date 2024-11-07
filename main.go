@@ -154,11 +154,11 @@ func main() {
 	}()
 
 	// Call next, and process telemetry, until we're shut down
-	eventCounter := mainLoop(ctx, invocationClient, batch, telemetryChan, logServer, telemetryClient)
+	eventCounter := mainLoop(ctx, conf, invocationClient, batch, telemetryChan, logServer, telemetryClient)
 
 	util.Logf("New Relic Extension shutting down after %v events\n", eventCounter)
 
-	pollLogServer(logServer, batch)
+	pollLogServer(conf, logServer, batch)
 	err = logServer.Close()
 	if err != nil {
 		util.Logln("Error shutting down Log API server", err)
@@ -191,7 +191,7 @@ func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryC
 }
 
 // mainLoop repeatedly calls the /next api, and processes telemetry and platform logs. The timing is rather complicated.
-func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, batch *telemetry.Batch, telemetryChan chan []byte, logServer *logserver.LogServer, telemetryClient *telemetry.Client) int {
+func mainLoop(ctx context.Context, conf *config.Configuration, invocationClient *client.InvocationClient, batch *telemetry.Batch, telemetryChan chan []byte, logServer *logserver.LogServer, telemetryClient *telemetry.Client) int {
 	eventCounter := 0
 	probablyTimeout := false
 
@@ -277,7 +277,7 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 			// Before we begin to await telemetry, harvest and ship. Ripe telemetry will mostly be handled here. Even that is a
 			// minority of invocations. Putting this here lets us run the HTTP request to send to NR in parallel with the Lambda
 			// handler, reducing or eliminating our latency impact.
-			pollLogServer(logServer, batch)
+			pollLogServer(conf, logServer, batch)
 			shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient)
 
 			select {
@@ -299,7 +299,7 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 
 				// Opportunity for an aggressive harvest, in which case, we definitely want to wait for the HTTP POST
 				// to complete. Mostly, nothing really happens here.
-				pollLogServer(logServer, batch)
+				pollLogServer(conf, logServer, batch)
 				shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient)
 			}
 
@@ -309,8 +309,17 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 }
 
 // pollLogServer polls for platform logs, and annotates telemetry
-func pollLogServer(logServer *logserver.LogServer, batch *telemetry.Batch) {
+func pollLogServer(conf *config.Configuration , logServer *logserver.LogServer, batch *telemetry.Batch) {
 	for _, platformLog := range logServer.PollPlatformChannel() {
+		lambdaMetrics, _ := telemetry.ParseLambdaLog(string(platformLog.Content))
+		metrics := lambdaMetrics.ConvertToMetrics("lambda.function")
+		statusCode, responseBody, err := telemetry.SendMetrics(conf.LicenseKey, metrics, true)
+		if err != nil {
+			util.Logf("Error sending metric: %v", err)
+		}
+		fmt.Printf("Response Status: %d\n", statusCode)
+		fmt.Printf("Response Body: %s\n", responseBody)
+		util.Logf("Platform log: %s", platformLog.Content)
 		inv := batch.AddTelemetry(platformLog.RequestID, platformLog.Content)
 		if inv == nil {
 			util.Debugf("Skipping platform log for request %v", platformLog.RequestID)
