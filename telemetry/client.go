@@ -2,20 +2,26 @@ package telemetry
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	crypto_rand "crypto/rand"
 	math_rand "math/rand"
 
+	"github.com/newrelic/newrelic-lambda-extension/apm"
+	"github.com/newrelic/newrelic-lambda-extension/config"
 	"github.com/newrelic/newrelic-lambda-extension/lambda/logserver"
 
 	"github.com/newrelic/newrelic-lambda-extension/util"
@@ -104,6 +110,76 @@ func getLogEndpointURL(licenseKey string, logEndpointOverride string) string {
 	}
 
 	return LogEndpointUS
+}
+
+
+func (c *Client) SendAPMTelemetry(ctx context.Context, invokedFunctionARN string, telemetry [][]byte, conf *config.Configuration) (error, int) {
+	util.Debugf("SendTelemetry: sending telemetry to New Relic...")
+	cmd := apm.RpmCmd{
+		Collector: conf.NewRelicHost,
+	}
+	
+	cs := apm.RpmControls{
+		License: conf.LicenseKey,
+		Client: &http.Client{
+			Timeout: 1000 * time.Second, 
+		},
+		GzipWriterPool: &sync.Pool{
+			New: func() interface{} {
+				return gzip.NewWriter(io.Discard)
+			},
+		},
+	}
+	// CONNECT
+	cmd.Name = "connect"
+	startTime := time.Now()
+	run_id, entity_guid := apm.Connect(cmd, cs)
+	fmt.Printf("Run ID: %s\n", run_id)
+	fmt.Printf("Entity GUID: %s\n", entity_guid)
+	endTime := time.Now()
+	duration := endTime.Sub(startTime)
+	fmt.Printf("Connect Cycle duration: %s\n", duration)
+	
+	for _, payload := range telemetry {
+		fmt.Printf("Payload: %s\n", payload)
+		data, err := apm.GetServerlessData(payload)
+		if err != nil {
+			log.Fatalf("failed to decode and decompress: %v", err)
+		}
+		if reflect.DeepEqual(data, apm.LambdaRawData{}) {
+			util.Debugf("SendTelemetry: no telemetry data found in payload")
+			continue
+		}
+		// SEND METRIC DATA
+	    startTimeMetric := time.Now()
+		updatedMetricData := apm.ProcessData(data.LambdaData.MetricData, run_id)
+		finalData, _ := json.Marshal(updatedMetricData)
+		cmd.Name = "metric_data"
+		cmd.Data = finalData
+		cmd.RunID = run_id
+		urlStr := apm.RpmURL(cmd, cs)
+	
+		rpmResponse := apm.CollectorRequestInternal(urlStr, cmd, cs)
+		fmt.Printf("Status Code: %d\n", rpmResponse.GetStatusCode())
+		endTimeMetric := time.Now()
+		durationMetric := endTimeMetric.Sub(startTimeMetric)
+		fmt.Printf("Send Metric duration: %s\n", durationMetric)
+
+		// SEND SPAN DATA
+	    startTimeSpan := time.Now()
+		updatedSpanData := apm.ProcessData(data.LambdaData.SpanEventData, run_id)
+		finalSpanData, _ := json.Marshal(updatedSpanData)
+		cmd.Name = "span_event_data"
+		cmd.Data = finalSpanData
+		cmd.RunID = run_id
+		urlSpanStr := apm.RpmURL(cmd, cs)
+		rpmSpanResponse := apm.CollectorRequestInternal(urlSpanStr, cmd, cs)
+		fmt.Printf("Status Code: %d\n", rpmSpanResponse.GetStatusCode())
+		endTimeSpan := time.Now()
+		durationSpan := endTimeSpan.Sub(startTimeSpan)
+		fmt.Printf("Send Metric duration: %s\n", durationSpan)
+	}
+	return nil, 1
 }
 
 func (c *Client) SendTelemetry(ctx context.Context, invokedFunctionARN string, telemetry [][]byte) (error, int) {

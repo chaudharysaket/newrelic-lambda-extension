@@ -157,18 +157,18 @@ func main() {
 	}()
 
 	// Call next, and process telemetry, until we're shut down
-	eventCounter := mainLoop(ctx, invocationClient, batch, telemetryChan, logServer, telemetryClient)
+	eventCounter := mainLoop(ctx, invocationClient, batch, telemetryChan, logServer, telemetryClient, conf)
 
 	util.Logf("New Relic Extension shutting down after %v events\n", eventCounter)
 
-	pollLogServer(logServer, batch)
+	// pollLogServer(logServer, batch)
 	err = logServer.Close()
 	if err != nil {
 		util.Logln("Error shutting down Log API server", err)
 	}
 
 	finalHarvest := batch.Close()
-	shipHarvest(ctx, finalHarvest, telemetryClient)
+	shipHarvest(ctx, finalHarvest, telemetryClient, conf)
 
 	util.Debugln("Waiting for background tasks to complete")
 	backgroundTasks.Wait()
@@ -194,7 +194,7 @@ func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryC
 }
 
 // mainLoop repeatedly calls the /next api, and processes telemetry and platform logs. The timing is rather complicated.
-func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, batch *telemetry.Batch, telemetryChan chan []byte, logServer *logserver.LogServer, telemetryClient *telemetry.Client) int {
+func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, batch *telemetry.Batch, telemetryChan chan []byte, logServer *logserver.LogServer, telemetryClient *telemetry.Client, conf *config.Configuration) int {
 	eventCounter := 0
 	probablyTimeout := false
 
@@ -280,8 +280,8 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 			// Before we begin to await telemetry, harvest and ship. Ripe telemetry will mostly be handled here. Even that is a
 			// minority of invocations. Putting this here lets us run the HTTP request to send to NR in parallel with the Lambda
 			// handler, reducing or eliminating our latency impact.
-			pollLogServer(logServer, batch)
-			shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient)
+			// pollLogServer(logServer, batch)
+			shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient, conf)
 
 			select {
 			case <-timeLimitContext.Done():
@@ -302,8 +302,8 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 
 				// Opportunity for an aggressive harvest, in which case, we definitely want to wait for the HTTP POST
 				// to complete. Mostly, nothing really happens here.
-				pollLogServer(logServer, batch)
-				shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient)
+				// pollLogServer(logServer, batch)
+				shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient, conf)
 			}
 
 			lastEventStart = eventStart
@@ -313,6 +313,7 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 
 // pollLogServer polls for platform logs, and annotates telemetry
 func pollLogServer(logServer *logserver.LogServer, batch *telemetry.Batch) {
+	// Add metric API changes.....
 	for _, platformLog := range logServer.PollPlatformChannel() {
 		inv := batch.AddTelemetry(platformLog.RequestID, platformLog.Content)
 		if inv == nil {
@@ -321,7 +322,7 @@ func pollLogServer(logServer *logserver.LogServer, batch *telemetry.Batch) {
 	}
 }
 
-func shipHarvest(ctx context.Context, harvested []*telemetry.Invocation, telemetryClient *telemetry.Client) {
+func shipHarvest(ctx context.Context, harvested []*telemetry.Invocation, telemetryClient *telemetry.Client, conf *config.Configuration) {
 	if len(harvested) > 0 {
 		util.Debugf("shipHarvest: harvesting agent telemetry")
 		telemetrySlice := make([][]byte, 0, 2*len(harvested))
@@ -329,11 +330,14 @@ func shipHarvest(ctx context.Context, harvested []*telemetry.Invocation, telemet
 			telemetrySlice = append(telemetrySlice, inv.Telemetry...)
 		}
 		util.Debugf("shipHarveset: %d telemetry payloads harvested", len(telemetrySlice))
-
-		err, _ := telemetryClient.SendTelemetry(ctx, invokedFunctionARN, telemetrySlice)
-		if err != nil {
-			util.Logf("Failed to send harvested telemetry for %d invocations %s", len(harvested), err)
+		apmErr, _ := telemetryClient.SendAPMTelemetry(ctx, invokedFunctionARN, telemetrySlice, conf)
+		if apmErr != nil {
+			util.Logf("Failed to send harvested telemetry for %d invocations %s", len(harvested), apmErr)
 		}
+		// err, _ := telemetryClient.SendTelemetry(ctx, invokedFunctionARN, telemetrySlice)
+		// if err != nil {
+		// 	util.Logf("Failed to send harvested telemetry for %d invocations %s", len(harvested), err)
+		// }
 	}
 }
 

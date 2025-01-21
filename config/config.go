@@ -37,6 +37,7 @@ type Configuration struct {
 	LogLevel                   string
 	LogServerHost              string
 	ClientTimeout              time.Duration
+	NewRelicHost               string
 }
 
 func parseIgnoredExtensionChecks(nrIgnoreExtensionChecksOverride bool, nrIgnoreExtensionChecksStr string) map[string]bool {
@@ -91,6 +92,7 @@ func ConfigurationFromEnvironment() *Configuration {
 	sendExtensionLogsStr, sendExtensionLogsOverride := os.LookupEnv("NEW_RELIC_EXTENSION_SEND_EXTENSION_LOGS")
 	logServerHostStr, logServerHostOverride := os.LookupEnv("NEW_RELIC_LOG_SERVER_HOST")
 	collectTraceIDStr, collectTraceIDOverride := os.LookupEnv("NEW_RELIC_COLLECT_TRACE_ID")
+	nrHostStr, nrHostOverride := os.LookupEnv("NEW_RELIC_HOST")
 
 	extensionEnabled := true
 	if nrEnabledOverride {
@@ -112,6 +114,10 @@ func ConfigurationFromEnvironment() *Configuration {
 	}
 
 	ret := &Configuration{ExtensionEnabled: extensionEnabled, LogsEnabled: logsEnabled}
+	
+	if nrHostOverride {
+		ret.NewRelicHost = nrHostStr
+	}
 
 	ret.ClientTimeout = DefaultClientTimeout
 	if ctOverride && clientTimeout != "" {
