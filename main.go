@@ -142,6 +142,7 @@ func main() {
 	// APM Connect
 	apmCmd, apmControls := apm.NewAPMClient(conf, registrationResponse.FunctionName)
 	apm.APMConnect(apmCmd, apmControls)
+	entityGuid := apmControls.GetEntityGuid()
 	// Run startup checks
 	go func() {
 		if conf.IgnoreExtensionChecks["all"] {
@@ -157,7 +158,7 @@ func main() {
 
 	go func() {
 		defer backgroundTasks.Done()
-		logShipLoop(ctx, logServer, telemetryClient)
+		logShipLoop(ctx, logServer, telemetryClient, entityGuid)
 	}()
 
 	// Call next, and process telemetry, until we're shut down
@@ -183,14 +184,14 @@ func main() {
 }
 
 // logShipLoop ships function logs to New Relic as they arrive.
-func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryClient *telemetry.Client) {
+func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryClient *telemetry.Client, entityGuid string) {
 	for {
 		functionLogs, more := logServer.AwaitFunctionLogs()
 		if !more {
 			return
 		}
 
-		err := telemetryClient.SendFunctionLogs(ctx, invokedFunctionARN, functionLogs)
+		err := telemetryClient.SendFunctionLogs(ctx, invokedFunctionARN, functionLogs, entityGuid)
 		if err != nil {
 			util.Logf("Failed to send %d function logs", len(functionLogs))
 		}

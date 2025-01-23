@@ -340,7 +340,7 @@ func TestSendFunctionLogsEmpty(t *testing.T) {
 	logLines := []logserver.LogLine{}
 
 	startSendLogs := time.Now()
-	err := client.SendFunctionLogs(context.Background(), testARN, logLines)
+	err := client.SendFunctionLogs(context.Background(), testARN, logLines, "test-entity-guid")
 	sendDuration := time.Since(startSendLogs)
 
 	if err != nil {
@@ -386,7 +386,7 @@ func TestSendFunctionLogsSendingTimeout(t *testing.T) {
 	}
 
 	startSendLogs := time.Now()
-	err := client.SendFunctionLogs(context.Background(), testARN, logLines)
+	err := client.SendFunctionLogs(context.Background(), testARN, logLines, "test-entity-guid")
 	sendDuration := time.Since(startSendLogs)
 
 	if err != nil {

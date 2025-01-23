@@ -309,14 +309,14 @@ func (c *Client) attemptSend(ctx context.Context, currentPayloadBytes []byte, bu
 }
 
 // SendFunctionLogs constructs log payloads and sends them to new relic
-func (c *Client) SendFunctionLogs(ctx context.Context, invokedFunctionARN string, lines []logserver.LogLine) error {
+func (c *Client) SendFunctionLogs(ctx context.Context, invokedFunctionARN string, lines []logserver.LogLine, entityGuid string) error {
 	start := time.Now()
 	if len(lines) == 0 {
 		util.Debugln("client.SendFunctionLogs invoked with 0 log lines. Returning without sending a payload to New Relic")
 		return nil
 	}
 
-	compressedPayloads, builder, err := c.buildLogPayloads(ctx, invokedFunctionARN, lines)
+	compressedPayloads, builder, err := c.buildLogPayloads(ctx, invokedFunctionARN, lines, entityGuid)
 	if err != nil {
 		return err
 	}
@@ -362,11 +362,14 @@ func getNewRelicTags(common map[string]interface{}) {
 }
 
 // buildLogPayloads is a helper function that improves readability of the SendFunctionLogs method
-func (c *Client) buildLogPayloads(ctx context.Context, invokedFunctionARN string, lines []logserver.LogLine) ([]*bytes.Buffer, requestBuilder, error) {
+func (c *Client) buildLogPayloads(ctx context.Context, invokedFunctionARN string, lines []logserver.LogLine, entityGuid string) ([]*bytes.Buffer, requestBuilder, error) {
 	common := map[string]interface{}{
 		"plugin":    util.Id,
 		"faas.arn":  invokedFunctionARN,
 		"faas.name": c.functionName,
+		"entity.guid": "MTAxOTYwODR8QVBNfEFQUExJQ0FUSU9OfDIwNDk0MjM2OQ",
+		"entity.name": c.functionName,
+		"entity.type": "APM",
 	}
 	
 	getNewRelicTags(common)
