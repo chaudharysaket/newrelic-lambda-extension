@@ -2,7 +2,6 @@ package telemetry
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -14,7 +13,6 @@ import (
 	"os"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
 
 	crypto_rand "crypto/rand"
@@ -113,35 +111,13 @@ func getLogEndpointURL(licenseKey string, logEndpointOverride string) string {
 }
 
 
-func (c *Client) SendAPMTelemetry(ctx context.Context, invokedFunctionARN string, telemetry [][]byte, conf *config.Configuration) (error, int) {
+func (c *Client) SendAPMTelemetry(ctx context.Context, invokedFunctionARN string, telemetry [][]byte, conf *config.Configuration, cmd apm.RpmCmd, cs *apm.RpmControls) (error, int) {
 	util.Debugf("SendTelemetry: sending telemetry to New Relic...")
-	cmd := apm.RpmCmd{
-		Collector: conf.NewRelicHost,
-	}
 	
-	cs := apm.RpmControls{
-		License: conf.LicenseKey,
-		Client: &http.Client{
-			Timeout: 1000 * time.Second, 
-		},
-		GzipWriterPool: &sync.Pool{
-			New: func() interface{} {
-				return gzip.NewWriter(io.Discard)
-			},
-		},
-	}
-	// CONNECT
-	cmd.Name = "connect"
-	startTime := time.Now()
-	run_id, entity_guid := apm.Connect(cmd, cs)
-	fmt.Printf("Run ID: %s\n", run_id)
-	fmt.Printf("Entity GUID: %s\n", entity_guid)
-	endTime := time.Now()
-	duration := endTime.Sub(startTime)
-	fmt.Printf("Connect Cycle duration: %s\n", duration)
+	run_id := cs.GetRunId()
 	
 	for _, payload := range telemetry {
-		fmt.Printf("Payload: %s\n", payload)
+		// fmt.Printf("Payload: %s\n", payload)
 		data, err := apm.GetServerlessData(payload)
 		if err != nil {
 			log.Fatalf("failed to decode and decompress: %v", err)

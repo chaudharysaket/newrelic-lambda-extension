@@ -30,7 +30,8 @@ func UnmarshalConnectReply(body []byte) (*ConnectReply, error) {
 }
 
 
-func Connect(cmd RpmCmd, cs RpmControls) (string, string) {
+
+func Connect(cmd RpmCmd, cs *RpmControls) (string, string) {
 
 	pid := os.Getpid()
 	headers := map[string]string{
@@ -100,6 +101,8 @@ func Connect(cmd RpmCmd, cs RpmControls) (string, string) {
 			
 		}
 	}
+	cs.SetRunId(connectReponse.RunID)
+	cs.SetEntityGuid(connectReponse.EntityGUID)
 	return connectReponse.RunID, connectReponse.EntityGUID
 
 }

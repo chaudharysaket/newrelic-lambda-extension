@@ -10,6 +10,9 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"time"
+
+	"github.com/newrelic/newrelic-lambda-extension/config"
 )
 
 
@@ -47,6 +50,10 @@ type RpmControls struct {
 	License        string
 	Client         *http.Client
 	GzipWriterPool *sync.Pool
+	FunctionName   	string
+	EntityGuid 		string
+	RunID		  	string
+	mutex    		sync.Mutex
 }
 
 
@@ -56,7 +63,43 @@ type rpmResponse struct {
 	err         error
 }
 
-func RpmURL(cmd RpmCmd, cs RpmControls) string {
+func (cs *RpmControls) SetEntityGuid(entityGuid string) {
+	cs.mutex.Lock() 
+	defer cs.mutex.Unlock()
+	cs.EntityGuid = entityGuid
+}
+
+func (cs *RpmControls) GetEntityGuid() string {
+	cs.mutex.Lock() 
+	defer cs.mutex.Unlock()
+	return cs.EntityGuid
+}
+
+func (cs *RpmControls) SetFunctionName(functionName string) {
+	cs.mutex.Lock() 
+	defer cs.mutex.Unlock()
+	cs.FunctionName = functionName
+}
+
+func (cs *RpmControls) GetFunctionName() string {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+	return cs.FunctionName
+}
+
+func (cs *RpmControls) SetRunId(runId string) {
+	cs.mutex.Lock() 
+	defer cs.mutex.Unlock()
+	cs.RunID = runId
+}
+
+func (cs *RpmControls) GetRunId() string {
+	cs.mutex.Lock() 
+	defer cs.mutex.Unlock()
+	return cs.RunID
+}
+
+func RpmURL(cmd RpmCmd, cs *RpmControls) string {
 	var u url.URL
 
 	u.Host = cmd.Collector
@@ -167,7 +210,7 @@ func compress(b []byte, gzipWriterPool *sync.Pool) (*bytes.Buffer, error) {
 	return &buf, nil
 }
 
-func CollectorRequestInternal(url string, cmd RpmCmd, cs RpmControls) *rpmResponse {
+func CollectorRequestInternal(url string, cmd RpmCmd, cs *RpmControls) *rpmResponse {
 	compressed, err := compress(cmd.Data, cs.GzipWriterPool)
 
 	req, err := http.NewRequest("POST", url, compressed)
@@ -201,4 +244,36 @@ func CollectorRequestInternal(url string, cmd RpmCmd, cs RpmControls) *rpmRespon
 func ProcessData(data []interface{}, runId string) []interface{} {
 	data[0] = runId
 	return data
+}
+
+func NewAPMClient(conf *config.Configuration, FunctionName string ) (RpmCmd, *RpmControls) {
+	cmd := RpmCmd{
+		Collector: conf.NewRelicHost,
+	}
+
+	cs := RpmControls{
+		License: conf.LicenseKey,
+		Client: &http.Client{
+			Timeout: 1000 * time.Second, 
+		},
+		GzipWriterPool: &sync.Pool{
+			New: func() interface{} {
+				return gzip.NewWriter(io.Discard)
+			},
+		},
+		FunctionName: FunctionName,
+	}
+	return cmd, &cs
+}
+
+func APMConnect(apmCmd RpmCmd, apmControls *RpmControls) {
+	// CONNECT
+	apmCmd.Name = "connect"
+	startTime := time.Now()
+	run_id, entity_guid := Connect(apmCmd, apmControls)
+	fmt.Printf("Run ID: %s\n", run_id)
+	fmt.Printf("Entity GUID: %s\n", entity_guid)
+	endTime := time.Now()
+	duration := endTime.Sub(startTime)
+	fmt.Printf("Connect Cycle duration: %s\n", duration)
 }
