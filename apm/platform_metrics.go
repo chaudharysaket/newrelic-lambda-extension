@@ -84,7 +84,7 @@ func ParseLambdaLog(logLine string) (*LambdaMetrics, error) {
 func (lm *LambdaMetrics) ConvertToMetrics(prefix string, entityGuid string, functionName string) []Metric {
 	timestamp := util.Timestamp()
 	attributes := map[string]string{
-		"requestId": lm.RequestID,
+		"aws.requestId": lm.RequestID,
 		"entity.guid": entityGuid,
 		"entity.name": functionName,
 		"entity.type": "APM",
