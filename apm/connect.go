@@ -1,10 +1,18 @@
 package apm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"reflect"
+	"sync"
+	"time"
+
+	"github.com/newrelic/newrelic-lambda-extension/config"
+	"github.com/newrelic/newrelic-lambda-extension/util"
 )
 
 type PreconnectReply struct {
@@ -87,4 +95,46 @@ func Connect(cmd RpmCmd, cs *RpmControls) (string, string) {
 	cs.SetEntityGuid(connectReponse.EntityGUID)
 	return connectReponse.RunID, connectReponse.EntityGUID
 
+}
+
+// Function to send data based on the type specified
+func sendAPMTelemetryInternal(data []interface{}, dataType string, wg *sync.WaitGroup, run_id string, cmd RpmCmd, cs *RpmControls) {
+	defer wg.Done()
+	if len(data) > 0 {
+		startTimeMetric := time.Now()
+		updatedMetricData := ProcessData(data, run_id)
+		finalMetricData, _ := json.Marshal(updatedMetricData)
+		cmd.Name = dataType
+		cmd.Data = finalMetricData
+		cmd.RunID = run_id
+		rpmResponse := CollectorRequest(cmd, cs)
+
+		fmt.Printf("Status Code %v telemetry: %d\n", dataType, rpmResponse.GetStatusCode())
+		endTimeMetric := time.Now()
+		durationMetric := endTimeMetric.Sub(startTimeMetric)
+		fmt.Printf("Send %v duration: %s\n", dataType, durationMetric)
+	}
+}
+
+func SendAPMTelemetry(ctx context.Context, invokedFunctionARN string, payload []byte, conf *config.Configuration, cmd RpmCmd, cs *RpmControls) (error, int) {
+	util.Debugf("SendTelemetry: sending telemetry to New Relic...")
+	
+	run_id := cs.GetRunId()
+	
+	// fmt.Printf("Payload: %s\n", payload)
+	data, err := GetServerlessData(payload)
+	if err != nil {
+		log.Fatalf("failed to decode and decompress: %v", err)
+	}
+	if reflect.DeepEqual(data, LambdaRawData{}) {
+		util.Debugf("SendTelemetry: no telemetry data found in payload")
+		return nil, 1
+	}
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go sendAPMTelemetryInternal(data.LambdaData.MetricData, CmdMetrics, &wg, run_id, cmd, cs)
+	go sendAPMTelemetryInternal(data.LambdaData.SpanEventData, CmdSpanEvents, &wg, run_id, cmd, cs)
+	go sendAPMTelemetryInternal(data.LambdaData.ErrorData, CmdErrorData, &wg, run_id, cmd, cs)
+	wg.Wait()
+	return nil, 1
 }

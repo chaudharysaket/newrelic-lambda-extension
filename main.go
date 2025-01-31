@@ -171,7 +171,7 @@ func main() {
 	if err != nil {
 		util.Logln("Error shutting down Log API server", err)
 	}
-
+	
 	finalHarvest := batch.Close()
 	shipHarvest(ctx, finalHarvest, telemetryClient, conf, apmCmd, apmControls)
 
@@ -297,18 +297,22 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 				continue
 			case telemetryBytes := <-telemetryChan:
 				timeLimitCancel()
+				if conf.LambdaAPMMode {
+					shipAPMHarvest(ctx, telemetryBytes, conf, apmCmd, apmControls)
+				} else {
 
-				// We received telemetry
-				util.Debugf("Agent telemetry bytes: %s", base64.URLEncoding.EncodeToString(telemetryBytes))
-				inv := batch.AddTelemetry(lastRequestId, telemetryBytes)
-				if inv == nil {
-					util.Logf("Failed to add telemetry for request %v", lastRequestId)
+					// We received telemetry
+					util.Debugf("Agent telemetry bytes: %s", base64.URLEncoding.EncodeToString(telemetryBytes))
+					inv := batch.AddTelemetry(lastRequestId, telemetryBytes)
+					if inv == nil {
+						util.Logf("Failed to add telemetry for request %v", lastRequestId)
+					}
+
+					// Opportunity for an aggressive harvest, in which case, we definitely want to wait for the HTTP POST
+					// to complete. Mostly, nothing really happens here.
+					pollLogServer(logServer, batch, conf, apmControls)
+					shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient, conf, apmCmd, apmControls)
 				}
-
-				// Opportunity for an aggressive harvest, in which case, we definitely want to wait for the HTTP POST
-				// to complete. Mostly, nothing really happens here.
-				pollLogServer(logServer, batch, conf, apmControls)
-				shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient, conf, apmCmd, apmControls)
 			}
 
 			lastEventStart = eventStart
@@ -347,14 +351,17 @@ func shipHarvest(ctx context.Context, harvested []*telemetry.Invocation, telemet
 			telemetrySlice = append(telemetrySlice, inv.Telemetry...)
 		}
 		util.Debugf("shipHarveset: %d telemetry payloads harvested", len(telemetrySlice))
-		apmErr, _ := telemetryClient.SendAPMTelemetry(ctx, invokedFunctionARN, telemetrySlice, conf, cmd, cs)
-		if apmErr != nil {
-			util.Logf("Failed to send harvested telemetry for %d invocations %s", len(harvested), apmErr)
-		}
 		err, _ := telemetryClient.SendTelemetry(ctx, invokedFunctionARN, telemetrySlice)
 		if err != nil {
 			util.Logf("Failed to send harvested telemetry for %d invocations %s", len(harvested), err)
 		}
+	}
+}
+
+func shipAPMHarvest(ctx context.Context, payload []byte , conf *config.Configuration, cmd apm.RpmCmd, cs *apm.RpmControls) {
+	apmErr, _ := apm.SendAPMTelemetry(ctx, invokedFunctionARN, payload, conf, cmd, cs)
+	if apmErr != nil {
+		util.Logf("Failed to send APM telemetry for invocations %s", apmErr)
 	}
 }
 

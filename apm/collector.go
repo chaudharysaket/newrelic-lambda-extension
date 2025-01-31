@@ -31,7 +31,7 @@ const (
 	cmdLogEvents    = "log_event_data"
 	cmdTxnEvents    = "analytic_event_data"
 	cmdErrorEvents  = "error_event_data"
-	cmdErrorData    = "error_data"
+	CmdErrorData    = "error_data"
 	cmdTxnTraces    = "transaction_sample_data"
 	cmdSlowSQLs     = "sql_trace_data"
 	CmdSpanEvents   = "span_event_data"
