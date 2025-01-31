@@ -171,10 +171,10 @@ func main() {
 	if err != nil {
 		util.Logln("Error shutting down Log API server", err)
 	}
-	
-	finalHarvest := batch.Close()
-	shipHarvest(ctx, finalHarvest, telemetryClient, conf, apmCmd, apmControls)
-
+	if !conf.LambdaAPMMode {
+		finalHarvest := batch.Close()
+		shipHarvest(ctx, finalHarvest, telemetryClient, conf, apmCmd, apmControls)
+	}
 	util.Debugln("Waiting for background tasks to complete")
 	backgroundTasks.Wait()
 
@@ -286,8 +286,9 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 			// minority of invocations. Putting this here lets us run the HTTP request to send to NR in parallel with the Lambda
 			// handler, reducing or eliminating our latency impact.
 			pollLogServer(logServer, batch, conf, apmControls)
-			shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient, conf, apmCmd, apmControls)
-
+			if !conf.LambdaAPMMode {
+				shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient, conf, apmCmd, apmControls)
+			}
 			select {
 			case <-timeLimitContext.Done():
 				timeLimitCancel()
