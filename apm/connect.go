@@ -1,16 +1,26 @@
 package apm
 
 import (
-	"bytes"
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
-
 )
 
+type PreconnectReply struct {
+	Collector        string           `json:"redirect_host"`
+}
+
+func UnmarshalPreConnectReply(body []byte) (*PreconnectReply, error) {
+	var preconnect struct {
+		Preconnect PreconnectReply `json:"return_value"`
+	}
+	err := json.Unmarshal(body, &preconnect)
+	if nil != err {
+		return nil, fmt.Errorf("unable to parse pre-connect reply: %v", err)
+	}
+	return &preconnect.Preconnect, nil
+}
 
 type ConnectReply struct {
 	RunID                 string        `json:"agent_run_id"`
@@ -29,17 +39,27 @@ func UnmarshalConnectReply(body []byte) (*ConnectReply, error) {
 	return reply.Reply, nil
 }
 
+type preconnectRequest struct {
+	SecurityPoliciesToken string `json:"security_policies_token,omitempty"`
+	HighSecurity          bool   `json:"high_security"`
+}
 
+func PreConnect(cmd RpmCmd, cs *RpmControls) string{
+	preconnectData, _ := json.Marshal([]preconnectRequest{{
+		SecurityPoliciesToken: "",
+		HighSecurity:          false,
+	}})
+	cmd.Data = preconnectData
+	cmd.Name = cmdPreconnect
+	resp := CollectorRequest(cmd, cs)
+	body, _ := io.ReadAll(resp.GetBody())
+	preConnectReponse, _:= UnmarshalPreConnectReply(body)
+	return preConnectReponse.Collector
+}
 
 func Connect(cmd RpmCmd, cs *RpmControls) (string, string) {
 
 	pid := os.Getpid()
-	headers := map[string]string{
-		"User-Agent":       "NewRelic-Go-Agent/3.35.1",
-		"Accept-Encoding":  "deflate",
-		"Content-Encoding": "gzip", 
-		"Content-Type":     "application/json",
-	}
 	AppName := os.Getenv("AWS_LAMBDA_FUNCTION_NAME")
 	data := []map[string]interface{}{
 		{
@@ -51,49 +71,11 @@ func Connect(cmd RpmCmd, cs *RpmControls) (string, string) {
 			"identifier":     AppName,
 		},
 	}
+	cmd.Data, _ = json.Marshal(data)
+	cmd.Name = cmdConnect
+	resp := CollectorRequest(cmd, cs)
 
-	urlStr := RpmURL(cmd, cs)
-
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		fmt.Println("Error marshaling JSON:", err)
-		return "nil", "nil"
-	}
-
-	var compressedData bytes.Buffer
-	writer := gzip.NewWriter(&compressedData)
-	_, err = writer.Write(jsonData)
-	if err != nil {
-		fmt.Println("Error writing gzip data:", err)
-		return "nil", "nil"
-	}
-
-	writer.Close()
-
-	req, err := http.NewRequest("POST", urlStr, &compressedData)
-	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return "nil", "nil"
-	}
-
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println("Error executing request:", err)
-		return "nil", "nil"
-	}
-	defer resp.Body.Close()
-
-	r := newRPMResponse(nil).AddStatusCode(resp.StatusCode)
-	body, err := io.ReadAll(resp.Body)
-	if r.GetError() == nil {
-		r.SetError(err)
-	}
-	r.AddBody(body)
+	body, _ := io.ReadAll(resp.GetBody())
 	connectReponse, _:= UnmarshalConnectReply(body)
 	if connectReponse != nil  {
 		if connectReponse.EntityGUID == "" && connectReponse.RunID == "" {

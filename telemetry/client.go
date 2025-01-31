@@ -129,14 +129,13 @@ func (c *Client) SendAPMTelemetry(ctx context.Context, invokedFunctionARN string
 		// SEND METRIC DATA
 	    startTimeMetric := time.Now()
 		updatedMetricData := apm.ProcessData(data.LambdaData.MetricData, run_id)
-		finalData, _ := json.Marshal(updatedMetricData)
-		cmd.Name = "metric_data"
-		cmd.Data = finalData
+		finalMetricData, _ := json.Marshal(updatedMetricData)
+		cmd.Name = apm.CmdMetrics
+		cmd.Data = finalMetricData
 		cmd.RunID = run_id
-		urlStr := apm.RpmURL(cmd, cs)
+		rpmResponse := apm.CollectorRequest(cmd, cs)
 	
-		rpmResponse := apm.CollectorRequestInternal(urlStr, cmd, cs)
-		fmt.Printf("Status Code: %d\n", rpmResponse.GetStatusCode())
+		fmt.Printf("Status Code Metric telemetry: %d\n", rpmResponse.GetStatusCode())
 		endTimeMetric := time.Now()
 		durationMetric := endTimeMetric.Sub(startTimeMetric)
 		fmt.Printf("Send Metric duration: %s\n", durationMetric)
@@ -145,15 +144,14 @@ func (c *Client) SendAPMTelemetry(ctx context.Context, invokedFunctionARN string
 	    startTimeSpan := time.Now()
 		updatedSpanData := apm.ProcessData(data.LambdaData.SpanEventData, run_id)
 		finalSpanData, _ := json.Marshal(updatedSpanData)
-		cmd.Name = "span_event_data"
+		cmd.Name = apm.CmdSpanEvents
 		cmd.Data = finalSpanData
 		cmd.RunID = run_id
-		urlSpanStr := apm.RpmURL(cmd, cs)
-		rpmSpanResponse := apm.CollectorRequestInternal(urlSpanStr, cmd, cs)
-		fmt.Printf("Status Code: %d\n", rpmSpanResponse.GetStatusCode())
+		rpmSpanResponse := apm.CollectorRequest(cmd, cs)
+		fmt.Printf("Status Code Span telemetry: %d\n", rpmSpanResponse.GetStatusCode())
 		endTimeSpan := time.Now()
 		durationSpan := endTimeSpan.Sub(startTimeSpan)
-		fmt.Printf("Send Metric duration: %s\n", durationSpan)
+		fmt.Printf("Send Span duration: %s\n", durationSpan)
 	}
 	return nil, 1
 }

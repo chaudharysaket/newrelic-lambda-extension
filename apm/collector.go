@@ -26,7 +26,7 @@ const (
 	// Methods used in collector communication.
 	cmdPreconnect   = "preconnect"
 	cmdConnect      = "connect"
-	cmdMetrics      = "metric_data"
+	CmdMetrics      = "metric_data"
 	cmdCustomEvents = "custom_event_data"
 	cmdLogEvents    = "log_event_data"
 	cmdTxnEvents    = "analytic_event_data"
@@ -34,7 +34,7 @@ const (
 	cmdErrorData    = "error_data"
 	cmdTxnTraces    = "transaction_sample_data"
 	cmdSlowSQLs     = "sql_trace_data"
-	cmdSpanEvents   = "span_event_data"
+	CmdSpanEvents   = "span_event_data"
 )
 
 type RpmCmd struct {
@@ -210,7 +210,15 @@ func compress(b []byte, gzipWriterPool *sync.Pool) (*bytes.Buffer, error) {
 	return &buf, nil
 }
 
-func CollectorRequestInternal(url string, cmd RpmCmd, cs *RpmControls) *rpmResponse {
+// collectorRequest makes a request to New Relic.
+func CollectorRequest(cmd RpmCmd, cs *RpmControls) *rpmResponse {
+	url := RpmURL(cmd, cs)
+	resp := collectorRequestInternal(url, cmd, cs)
+	return resp
+}
+
+
+func collectorRequestInternal(url string, cmd RpmCmd, cs *RpmControls) *rpmResponse {
 	compressed, err := compress(cmd.Data, cs.GzipWriterPool)
 
 	req, err := http.NewRequest("POST", url, compressed)
@@ -263,12 +271,29 @@ func NewAPMClient(conf *config.Configuration, FunctionName string ) (RpmCmd, *Rp
 		},
 		FunctionName: FunctionName,
 	}
+	if conf.PreconnectEnabled {
+		// Perform Preconnect before sending cmd
+		redirectHost := apmPreConnect(cmd, &cs)
+		cmd.Collector = redirectHost
+	}
 	return cmd, &cs
+}
+
+func apmPreConnect(apmCmd RpmCmd, apmControls *RpmControls) string {
+	// PRE-CONNECT
+	apmCmd.Name = cmdPreconnect
+	startTime := time.Now()
+	redirect_host := PreConnect(apmCmd, apmControls)
+	fmt.Printf("Redirect Host: %s\n", redirect_host)
+	endTime := time.Now()
+	duration := endTime.Sub(startTime)
+	fmt.Printf("Pre-Connect Cycle duration: %s\n", duration)
+	return redirect_host
 }
 
 func APMConnect(apmCmd RpmCmd, apmControls *RpmControls) {
 	// CONNECT
-	apmCmd.Name = "connect"
+	apmCmd.Name = cmdConnect
 	startTime := time.Now()
 	run_id, entity_guid := Connect(apmCmd, apmControls)
 	fmt.Printf("Run ID: %s\n", run_id)

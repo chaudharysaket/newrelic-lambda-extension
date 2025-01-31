@@ -38,6 +38,8 @@ type Configuration struct {
 	LogServerHost              string
 	ClientTimeout              time.Duration
 	NewRelicHost               string
+	PreconnectEnabled		   bool
+	LambdaAPMMode 			   bool
 }
 
 func parseIgnoredExtensionChecks(nrIgnoreExtensionChecksOverride bool, nrIgnoreExtensionChecksStr string) map[string]bool {
@@ -92,7 +94,9 @@ func ConfigurationFromEnvironment() *Configuration {
 	sendExtensionLogsStr, sendExtensionLogsOverride := os.LookupEnv("NEW_RELIC_EXTENSION_SEND_EXTENSION_LOGS")
 	logServerHostStr, logServerHostOverride := os.LookupEnv("NEW_RELIC_LOG_SERVER_HOST")
 	collectTraceIDStr, collectTraceIDOverride := os.LookupEnv("NEW_RELIC_COLLECT_TRACE_ID")
+	nrAPMModeStr, nrAPMModeOverride := os.LookupEnv("NEW_RELIC_APM_LAMBDA_MODE")
 	nrHostStr, nrHostOverride := os.LookupEnv("NEW_RELIC_HOST")
+	nrPreconnectEnabledStr, nrPreconnectEnabledOverride := os.LookupEnv("NEW_RELIC_PRECONNECT_ENABLED")
 
 	extensionEnabled := true
 	if nrEnabledOverride {
@@ -114,9 +118,15 @@ func ConfigurationFromEnvironment() *Configuration {
 	}
 
 	ret := &Configuration{ExtensionEnabled: extensionEnabled, LogsEnabled: logsEnabled}
-	
+	if nrAPMModeOverride && strings.ToLower(nrAPMModeStr) == "true" {
+		ret.LambdaAPMMode = true
+	}
+
 	if nrHostOverride {
 		ret.NewRelicHost = nrHostStr
+	}
+	if nrPreconnectEnabledOverride && strings.ToLower(nrPreconnectEnabledStr) == "true" {
+		ret.PreconnectEnabled = true
 	}
 
 	ret.ClientTimeout = DefaultClientTimeout
