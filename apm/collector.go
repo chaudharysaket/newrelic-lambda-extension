@@ -15,6 +15,10 @@ import (
 	"github.com/newrelic/newrelic-lambda-extension/config"
 )
 
+var (
+	Once sync.Once
+	ConnectDone = make(chan struct{})
+)
 
 const (
 	MaxPayloadSizeInBytes = 1000 * 1000
@@ -276,6 +280,8 @@ func NewAPMClient(conf *config.Configuration, FunctionName string ) (RpmCmd, *Rp
 		redirectHost := apmPreConnect(cmd, &cs)
 		cmd.Collector = redirectHost
 	}
+	apmConnect(cmd, &cs)
+	close(ConnectDone)
 	return cmd, &cs
 }
 
@@ -291,7 +297,7 @@ func apmPreConnect(apmCmd RpmCmd, apmControls *RpmControls) string {
 	return redirect_host
 }
 
-func APMConnect(apmCmd RpmCmd, apmControls *RpmControls) {
+func apmConnect(apmCmd RpmCmd, apmControls *RpmControls) {
 	// CONNECT
 	apmCmd.Name = cmdConnect
 	startTime := time.Now()
