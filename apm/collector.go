@@ -55,51 +55,42 @@ type RpmControls struct {
 	Client         *http.Client
 	GzipWriterPool *sync.Pool
 	FunctionName   	string
-	EntityGuid 		string
 	RunID		  	string
-	mutex    		sync.Mutex
+	
 }
 
-
+var (
+	mutex    		sync.Mutex
+	EntityGuid 		string
+)
 type rpmResponse struct {
 	statusCode  int
 	body        []byte
 	err         error
 }
 
-func (cs *RpmControls) SetEntityGuid(entityGuid string) {
-	cs.mutex.Lock() 
-	defer cs.mutex.Unlock()
-	cs.EntityGuid = entityGuid
+func SetEntityGuid(entityGuid string) {
+	mutex.Lock() 
+	defer mutex.Unlock()
+	EntityGuid = entityGuid
 }
 
-func (cs *RpmControls) GetEntityGuid() string {
-	cs.mutex.Lock() 
-	defer cs.mutex.Unlock()
-	return cs.EntityGuid
+func GetEntityGuid() string {
+	mutex.Lock() 
+	defer mutex.Unlock()
+	return EntityGuid
 }
 
-func (cs *RpmControls) SetFunctionName(functionName string) {
-	cs.mutex.Lock() 
-	defer cs.mutex.Unlock()
-	cs.FunctionName = functionName
-}
-
-func (cs *RpmControls) GetFunctionName() string {
-	cs.mutex.Lock()
-	defer cs.mutex.Unlock()
-	return cs.FunctionName
-}
 
 func (cs *RpmControls) SetRunId(runId string) {
-	cs.mutex.Lock() 
-	defer cs.mutex.Unlock()
+	mutex.Lock() 
+	defer mutex.Unlock()
 	cs.RunID = runId
 }
 
 func (cs *RpmControls) GetRunId() string {
-	cs.mutex.Lock() 
-	defer cs.mutex.Unlock()
+	mutex.Lock() 
+	defer mutex.Unlock()
 	return cs.RunID
 }
 

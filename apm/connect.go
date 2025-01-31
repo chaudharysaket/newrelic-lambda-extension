@@ -92,7 +92,7 @@ func Connect(cmd RpmCmd, cs *RpmControls) (string, string) {
 		}
 	}
 	cs.SetRunId(connectReponse.RunID)
-	cs.SetEntityGuid(connectReponse.EntityGUID)
+	SetEntityGuid(connectReponse.EntityGUID)
 	return connectReponse.RunID, connectReponse.EntityGUID
 
 }
