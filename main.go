@@ -234,10 +234,14 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 				// timed out, this will catch us up to the current state of telemetry, allowing us to resume.
 				select {
 				case telemetryBytes := <-telemetryChan:
-					// We received telemetry
-					util.Debugf("Agent telemetry bytes: %s", base64.URLEncoding.EncodeToString(telemetryBytes))
-					batch.AddTelemetry(lastRequestId, telemetryBytes)
-					util.Logf("We suspected a timeout for request %s but got telemetry anyway", lastRequestId)
+					if conf.LambdaAPMMode {
+						shipAPMHarvest(ctx, telemetryBytes, conf, apmCmd, apmControls)
+					} else {
+						// We received telemetry
+						util.Debugf("Agent telemetry bytes: %s", base64.URLEncoding.EncodeToString(telemetryBytes))
+						batch.AddTelemetry(lastRequestId, telemetryBytes)
+						util.Logf("We suspected a timeout for request %s but got telemetry anyway", lastRequestId)
+					}
 				default:
 				}
 			}
