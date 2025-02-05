@@ -24,6 +24,7 @@ type Metric struct {
 	Value      float64          `json:"value"`
 	Timestamp  int64            `json:"timestamp"`
 	Attributes map[string]string `json:"attributes"`
+	Interval   int64            `json:"interval.ms,omitempty"`
 }
 type MetricPayload struct {
 	Metrics []Metric `json:"metrics"`
@@ -35,14 +36,37 @@ type LambdaMetrics struct {
 	MemorySize     int64
 	MaxMemoryUsed  int64
 	InitDuration   *float64 
+	Error 		string
+	ErrorType	string
 }
-func ParseLambdaLog(logLine string) (*LambdaMetrics, error) {
+
+func ParseLambdaFaultLog(logLine string) (*LambdaMetrics, error) {
+	logPattern := `RequestId: (\S+)\s+Status: (\S+)(?:\s+ErrorType: (\S+))?`
+	logRe := regexp.MustCompile(logPattern)
+
+	matches := logRe.FindStringSubmatch(logLine)
+	if matches == nil {
+		return nil, fmt.Errorf("error parsing log line: %s", logLine)
+	}
+	metrics := &LambdaMetrics{
+		RequestID: matches[1],
+		Error: matches[2],
+	}
+	if len(matches) > 3 && matches[3] != "" {
+		metrics.ErrorType = matches[3]
+	}
+
+	return metrics, nil
+}
+
+func ParseLambdaReportLog(logLine string) (*LambdaMetrics, error) {
+	util.Debugf("[ERROR METRIC] Parsing log line: %s", logLine)
 	basicPattern := `RequestId: (\S+)\s+Duration: ([\d.]+) ms\s+Billed Duration: (\d+) ms\s+Memory Size: (\d+) MB\s+Max Memory Used: (\d+) MB`
 	initPattern := `Init Duration: ([\d.]+) ms`
 	basicRe := regexp.MustCompile(basicPattern)
 	basicMatches := basicRe.FindStringSubmatch(logLine)
 	if basicMatches == nil {
-		return nil, fmt.Errorf("invalid log format")
+		return ParseLambdaFaultLog(logLine)
 	}
 	duration, err := strconv.ParseFloat(basicMatches[2], 64)
 	if err != nil {
@@ -90,42 +114,65 @@ func (lm *LambdaMetrics) ConvertToMetrics(prefix string, entityGuid string, func
 		"entity.type": "APM",
 		
 	}
-	metrics := []Metric{
-		{
+	metrics := []Metric{}
+	if lm.Duration != 0 {
+		metrics = append(metrics, Metric{
 			Name:       prefix + ".duration",
 			Type:       "gauge",
 			Value:      lm.Duration,
 			Timestamp:  timestamp,
 			Attributes: attributes,
-		},
-		{
+		})
+	}
+	if lm.BilledDuration != 0 {
+		metrics = append(metrics, Metric{
 			Name:       prefix + ".billed_duration",
 			Type:       "gauge",
 			Value:      lm.BilledDuration,
 			Timestamp:  timestamp,
 			Attributes: attributes,
-		},
-		{
+		})
+	}
+	if lm.MemorySize != 0 {
+		metrics = append(metrics, Metric{
 			Name:       prefix + ".memory_size",
 			Type:       "gauge",
 			Value:      float64(lm.MemorySize),
 			Timestamp:  timestamp,
 			Attributes: attributes,
-		},
-		{
+		})
+	}
+
+	if lm.MaxMemoryUsed != 0 {
+		metrics = append(metrics, Metric{
 			Name:       prefix + ".max_memory_used",
 			Type:       "gauge",
 			Value:      float64(lm.MaxMemoryUsed),
 			Timestamp:  timestamp,
 			Attributes: attributes,
-		},
+		})
 	}
+
 	// Add init duration metric only if it exists
 	if lm.InitDuration != nil {
 		metrics = append(metrics, Metric{
 			Name:       prefix + ".init_duration",
 			Type:       "gauge",
 			Value:      *lm.InitDuration,
+			Timestamp:  timestamp,
+			Attributes: attributes,
+		})
+	}
+	// Add error metric only if it exists
+	if lm.Error != "" {
+		if lm.ErrorType != "" {
+			attributes["Error Type"] = lm.ErrorType
+		}
+		metrics = append(metrics, Metric{
+			Name:       prefix + ".error",
+			Type:       "count",
+			Value:      1,
+			Interval:  10000,
 			Timestamp:  timestamp,
 			Attributes: attributes,
 		})
@@ -139,7 +186,7 @@ func SendMetrics(apiKey string, metrics []Metric, skipTLSVerify bool) (int, stri
 		},
 	}
 	jsonData, err := json.Marshal(payload)
-	fmt.Printf("jsonData: %s\n", jsonData)
+	fmt.Printf("NEW jsonData with ERROR: %s\n", jsonData)
 	if err != nil {
 		return 0, "", fmt.Errorf("error marshaling JSON: %v", err)
 	}

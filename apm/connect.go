@@ -102,10 +102,10 @@ func sendAPMTelemetryInternal(data []interface{}, dataType string, wg *sync.Wait
 	defer wg.Done()
 	if len(data) > 0 {
 		startTimeMetric := time.Now()
-		updatedMetricData := ProcessData(data, run_id)
-		finalMetricData, _ := json.Marshal(updatedMetricData)
+		updatedData := ProcessData(data, run_id)
+		finalData, _ := json.Marshal(updatedData)
 		cmd.Name = dataType
-		cmd.Data = finalMetricData
+		cmd.Data = finalData
 		cmd.RunID = run_id
 		rpmResponse := CollectorRequest(cmd, cs)
 
@@ -131,10 +131,11 @@ func SendAPMTelemetry(ctx context.Context, invokedFunctionARN string, payload []
 		return nil, 1
 	}
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 	go sendAPMTelemetryInternal(data.LambdaData.MetricData, CmdMetrics, &wg, run_id, cmd, cs)
 	go sendAPMTelemetryInternal(data.LambdaData.SpanEventData, CmdSpanEvents, &wg, run_id, cmd, cs)
 	go sendAPMTelemetryInternal(data.LambdaData.ErrorData, CmdErrorData, &wg, run_id, cmd, cs)
+	go sendAPMTelemetryInternal(data.LambdaData.ErrorEventData, CmdErrorEvents, &wg, run_id, cmd, cs)
 	wg.Wait()
 	return nil, 1
 }

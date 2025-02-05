@@ -213,10 +213,13 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 			// Our call to next blocks. It is likely that the container is frozen immediately after we call NextEvent.
 			util.Debugln("mainLoop: waiting for next lambda invocation event...")
 			event, err := invocationClient.NextEvent(ctx)
-			// Perform APM Connect once
-			apm.Once.Do(func() {
-				apmCmd, apmControls = apm.NewAPMClient(conf, LambadFunctionName)
-			})
+			// Perform APM Connect once only if APM_Mode is enabled
+			if conf.LambdaAPMMode {
+				apm.Once.Do(func() {
+					apmCmd, apmControls = apm.NewAPMClient(conf, LambadFunctionName)
+				})
+			}
+			
 
 			// We've thawed.
 			eventStart := time.Now()
@@ -253,6 +256,7 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 
 			if event.EventType == api.Shutdown {
 				if event.ShutdownReason == api.Timeout && lastRequestId != "" {
+					util.Logf("During Shutdown Event: %v", event)
 					// Synthesize the timeout error message that the platform produces, and LLC parses
 					timestamp := eventStart.UTC()
 					timeoutSecs := eventStart.Sub(lastEventStart).Seconds()
@@ -337,7 +341,7 @@ func pollLogServer(logServer *logserver.LogServer, batch *telemetry.Batch, conf 
 	entityGuid := apm.GetEntityGuid()
 	functionName := LambadFunctionName
 	for _, platformLog := range logServer.PollPlatformChannel() {
-		lambdaMetrics, _ := apm.ParseLambdaLog(string(platformLog.Content))
+		lambdaMetrics, _ := apm.ParseLambdaReportLog(string(platformLog.Content))
 		metrics := lambdaMetrics.ConvertToMetrics("apm.lambda.transaction", entityGuid, functionName)
 		statusCode, responseBody, err := apm.SendMetrics(conf.LicenseKey, metrics, true)
 		if err != nil {

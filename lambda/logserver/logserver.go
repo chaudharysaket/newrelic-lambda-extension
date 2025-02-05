@@ -137,7 +137,7 @@ func (ls *LogServer) handler(res http.ResponseWriter, req *http.Request) {
 				}
 			}
 			ls.lastRequestIdLock.Unlock()
-		case "platform.report":
+		case "platform.report", "platform.fault":
 			metricString := ""
 			requestId := ""
 			switch event.Record.(type) {
