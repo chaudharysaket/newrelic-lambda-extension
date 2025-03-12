@@ -16,12 +16,12 @@ const (
 	telemetryNamedPipeRetryDelay = 10 * time.Millisecond
 )
 
-func InitTelemetryChannel() (chan []byte, error) {
+func InitTelemetryChannel() (chan []byte, chan []byte, error) {
 	_ = os.Remove(telemetryNamedPipePath)
 
 	err := syscall.Mkfifo(telemetryNamedPipePath, 0666)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// verify that the special file is visible in the file system
@@ -41,6 +41,7 @@ func InitTelemetryChannel() (chan []byte, error) {
 	}
 
 	telemetryChan := make(chan []byte)
+	platformErrorChan := make(chan []byte)
 
 	go func() {
 		for {
@@ -48,7 +49,7 @@ func InitTelemetryChannel() (chan []byte, error) {
 		}
 	}()
 
-	return telemetryChan, nil
+	return telemetryChan, platformErrorChan, nil
 }
 
 func pollForTelemetry() []byte {

@@ -31,6 +31,7 @@ type LogServer struct {
 	listenString      string
 	server            *http.Server
 	platformLogChan   chan LogLine
+	platformErrorChan chan []byte
 	functionLogChan   chan []LogLine
 	lastRequestId     string
 	lastRequestIdLock *sync.Mutex
@@ -52,6 +53,7 @@ func (ls *LogServer) Close() error {
 	}
 
 	close(ls.platformLogChan)
+	close(ls.platformErrorChan)
 	close(ls.functionLogChan)
 	return ret
 }
@@ -75,6 +77,11 @@ func (ls *LogServer) PollPlatformChannel() []LogLine {
 
 func (ls *LogServer) AwaitFunctionLogs() ([]LogLine, bool) {
 	ll, more := <-ls.functionLogChan
+	return ll, more
+}
+
+func (ls *LogServer) AwaitPlatformChan() ([]byte, bool) {
+	ll, more := <-ls.platformErrorChan
 	return ll, more
 }
 
@@ -172,7 +179,16 @@ func (ls *LogServer) handler(res http.ResponseWriter, req *http.Request) {
 			ls.platformLogChan <- reportLine
 		case "platform.logsDropped":
 			util.Logf("Platform dropped logs: %v", event.Record)
-		case "function", "extension", "platform.fault":
+		case "platform.fault":
+			record := event.Record.(string)
+			reportLine := LogLine{
+				Time:      event.Time,
+				RequestID: ls.lastRequestId,
+				Content:   []byte(record),
+			}
+			reportByte := reportLine.Content
+			ls.platformErrorChan <- reportByte
+		case "function", "extension":
 			record := event.Record.(string)
 			ls.lastRequestIdLock.Lock()
 			functionLogs = append(functionLogs, LogLine{
@@ -209,6 +225,7 @@ func startInternal(host string) (*LogServer, error) {
 		listenString:      listener.Addr().String(),
 		server:            server,
 		platformLogChan:   make(chan LogLine, platformLogBufferSize),
+		platformErrorChan: make(chan []byte),
 		functionLogChan:   make(chan []LogLine),
 		lastRequestIdLock: &sync.Mutex{},
 	}

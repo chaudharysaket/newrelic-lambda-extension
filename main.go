@@ -129,7 +129,7 @@ func main() {
 
 	// Init the telemetry sending client
 	telemetryClient := telemetry.New(registrationResponse.FunctionName, licenseKey, conf.TelemetryEndpoint, conf.LogEndpoint, batch, conf.CollectTraceID, conf.ClientTimeout)
-	telemetryChan, err := telemetry.InitTelemetryChannel()
+	telemetryChan, telemetryPlatformErrorChan, err := telemetry.InitTelemetryChannel()
 	if err != nil {
 		err2 := invocationClient.InitError(ctx, "telemetryClient.init", err)
 		if err2 != nil {
@@ -153,11 +153,12 @@ func main() {
 
 	go func() {
 		defer backgroundTasks.Done()
-		logShipLoop(ctx, logServer, telemetryClient)
+		logShipLoop(ctx, logServer, telemetryClient, telemetryPlatformErrorChan)
 	}()
 
 	// Call next, and process telemetry, until we're shut down
-	eventCounter := mainLoop(ctx, invocationClient, batch, telemetryChan, logServer, telemetryClient)
+
+	eventCounter := mainLoop(ctx, invocationClient, batch, telemetryChan, telemetryPlatformErrorChan, logServer, telemetryClient)
 
 	util.Logf("New Relic Extension shutting down after %v events\n", eventCounter)
 
@@ -179,7 +180,7 @@ func main() {
 }
 
 // logShipLoop ships function logs to New Relic as they arrive.
-func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryClient *telemetry.Client) {
+func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryClient *telemetry.Client, telemetryPlatformErrorChan chan []byte) {
 	for {
 		functionLogs, more := logServer.AwaitFunctionLogs()
 		if !more {
@@ -190,11 +191,16 @@ func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryC
 		if err != nil {
 			util.Logf("Failed to send %d function logs", len(functionLogs))
 		}
+		platformError, more := logServer.AwaitPlatformChan()
+		if more {
+			util.Logf("Platform error: %s", platformError)
+			telemetryPlatformErrorChan <- platformError
+		}
 	}
 }
 
 // mainLoop repeatedly calls the /next api, and processes telemetry and platform logs. The timing is rather complicated.
-func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, batch *telemetry.Batch, telemetryChan chan []byte, logServer *logserver.LogServer, telemetryClient *telemetry.Client) int {
+func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, batch *telemetry.Batch, telemetryChan chan []byte, telemetryPlatformErrorChan chan []byte, logServer *logserver.LogServer, telemetryClient *telemetry.Client) int {
 	eventCounter := 0
 	probablyTimeout := false
 
@@ -289,6 +295,9 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 
 				// We are about to timeout
 				probablyTimeout = true
+				continue
+			case platformError := <-telemetryPlatformErrorChan:
+				util.Logf("Platform error: ", platformError)
 				continue
 			case telemetryBytes := <-telemetryChan:
 				timeLimitCancel()

@@ -7,7 +7,7 @@ import (
 )
 
 func TestInitTelemetryChannel(t *testing.T) {
-	channel, err := InitTelemetryChannel()
+	channel,_, err := InitTelemetryChannel()
 
 	assert.Nil(t, err)
 	assert.Empty(t, channel)
