@@ -40,7 +40,6 @@ type Configuration struct {
 	ClientTimeout              time.Duration
 	NewRelicHost               string
 	APMLambdaMode              bool
-	PreconnectEnabled		   bool
 }
 
 func parseIgnoredExtensionChecks(nrIgnoreExtensionChecksOverride bool, nrIgnoreExtensionChecksStr string) map[string]bool {
@@ -122,7 +121,6 @@ func ConfigurationFromEnvironment() *Configuration {
 	ret := &Configuration{ExtensionEnabled: extensionEnabled, LogsEnabled: logsEnabled}
 	if nrAPMModeOverride && strings.ToLower(nrAPMModeStr) == "true" {
 		ret.APMLambdaMode = true
-		ret.PreconnectEnabled = true
 	}
 	if nrHostOverride {
 		ret.NewRelicHost = nrHostStr

@@ -17,8 +17,8 @@ PY311_DIST_X86_64=$DIST_DIR/python311.x86_64.zip
 PY312_DIST_ARM64=$DIST_DIR/python312.arm64.zip
 PY312_DIST_X86_64=$DIST_DIR/python312.x86_64.zip
 
-REGIONS_X86=(us-west-2)
-REGIONS_ARM=(us-west-2)
+REGIONS_X86=(us-east-1)
+REGIONS_ARM=(us-east-1)
 
 EXTENSION_DIST_DIR=extensions
 EXTENSION_DIST_ZIP=extension.zip
@@ -193,20 +193,20 @@ else
 fi
 
 
-# Build and publish for python3.11 arm64
-echo "Building and publishing for Python 3.11 ARM64..."
-build_python_version "3.11" "arm64" $PY311_DIST_ARM64
-publish_python_version $PY311_DIST_ARM64 "arm64" "3.11" "${REGIONS_ARM[@]}"
+# # Build and publish for python3.11 arm64
+# echo "Building and publishing for Python 3.11 ARM64..."
+# build_python_version "3.11" "arm64" $PY311_DIST_ARM64
+# publish_python_version $PY311_DIST_ARM64 "arm64" "3.11" "${REGIONS_ARM[@]}"
 
-# Build and publish for python3.11 x86_64
-echo "Building and publishing for Python 3.11 x86_64..."
-build_python_version "3.11" "x86_64" $PY311_DIST_X86_64
-publish_python_version $PY311_DIST_X86_64 "x86_64" "3.11" "${REGIONS_X86[@]}"
+# # Build and publish for python3.11 x86_64
+# echo "Building and publishing for Python 3.11 x86_64..."
+# build_python_version "3.11" "x86_64" $PY311_DIST_X86_64
+# publish_python_version $PY311_DIST_X86_64 "x86_64" "3.11" "${REGIONS_X86[@]}"
 
-# Build and publish for python3.12 arm64
-echo "Building and publishing for Python 3.12 ARM64..."
-build_python_version "3.12" "arm64" $PY312_DIST_ARM64
-publish_python_version $PY312_DIST_ARM64 "arm64" "3.12" "${REGIONS_ARM[@]}"
+# # Build and publish for python3.12 arm64
+# echo "Building and publishing for Python 3.12 ARM64..."
+# build_python_version "3.12" "arm64" $PY312_DIST_ARM64
+# publish_python_version $PY312_DIST_ARM64 "arm64" "3.12" "${REGIONS_ARM[@]}"
 
 # Build and publish for python3.12 x86_64
 echo "Building and publishing for Python 3.11 x86_64..."

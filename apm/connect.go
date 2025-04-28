@@ -25,6 +25,11 @@ type PreconnectReply struct {
 	Collector string `json:"redirect_host"`
 }
 
+type ConnectReply struct {
+	RunID      string `json:"agent_run_id"`
+	EntityGUID string `json:"entity_guid"`
+}
+
 func UnmarshalPreConnectReply(body []byte) (*PreconnectReply, error) {
 	var preconnect struct {
 		ReturnValue PreconnectReply `json:"return_value"`
@@ -33,11 +38,6 @@ func UnmarshalPreConnectReply(body []byte) (*PreconnectReply, error) {
 		return nil, fmt.Errorf("unable to parse pre-connect reply: %w", err)
 	}
 	return &preconnect.ReturnValue, nil
-}
-
-type ConnectReply struct {
-	RunID      string `json:"agent_run_id"`
-	EntityGUID string `json:"entity_guid"`
 }
 
 func UnmarshalConnectReply(body []byte) (*ConnectReply, error) {
@@ -55,7 +55,7 @@ type preconnectRequest struct {
 	HighSecurity          bool   `json:"high_security"`
 }
 
-func PreConnect(cmd RpmCmd, cs *RpmControls) (string, error) {
+func PreConnect(cmd RpmCmd, cs *rpmControls) (string, error) {
 	//Prepare preconnect data
 	preconnectData := []preconnectRequest{{
 		SecurityPoliciesToken: "",
@@ -66,7 +66,7 @@ func PreConnect(cmd RpmCmd, cs *RpmControls) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal preconnect data: %w", err)
 	}
-	// Set the command's data and name
+
 	cmd.Data = marshaledData
 	cmd.Name = cmdPreconnect
 
@@ -176,7 +176,7 @@ var agentRuntimeConfig = map[AgentRuntime]agentConfig{
 }
 
 
-func Connect(cmd RpmCmd, cs *RpmControls) (string, string, error) {
+func Connect(cmd RpmCmd, cs *rpmControls) (string, string, error) {
 	runtime := checkRuntime()
 	runtimeConfig := agentRuntimeConfig[runtime]
 	pid := os.Getpid()
@@ -229,7 +229,7 @@ func Connect(cmd RpmCmd, cs *RpmControls) (string, string, error) {
 }
 
 
-func SendErrorEvent(cmd RpmCmd, cs *RpmControls, errorData []interface{}) {
+func SendErrorEvent(cmd RpmCmd, cs *rpmControls, errorData []interface{}) {
 	tg := NewTraceIDGenerator(1453)
 	spanId := tg.GenerateSpanID()
 	traceId := tg.GenerateTraceID()
@@ -250,9 +250,9 @@ func SendErrorEvent(cmd RpmCmd, cs *RpmControls, errorData []interface{}) {
 }
 
 // Function to send data based on the type specified
-func sendAPMTelemetryInternal(data []interface{}, dataType string, wg *sync.WaitGroup, runID string, cmd RpmCmd, cs *RpmControls) error {
+func sendAPMTelemetryInternal(data []interface{}, dataType string, wg *sync.WaitGroup, runID string, cmd RpmCmd, cs *rpmControls) rpmResponse {
 	if len(data) == 0 {
-		return nil
+		return *newRPMResponse(nil)
 	}
 	wg.Add(1)
 	defer func() {
@@ -269,7 +269,7 @@ func sendAPMTelemetryInternal(data []interface{}, dataType string, wg *sync.Wait
 	enc := json.NewEncoder(&buf)
 	if err := enc.Encode(updatedData); err != nil {
 		util.Logf("Error encoding data for %s: %v", dataType, err)
-		return err
+		return *newRPMResponse(err)
 	}
 
 	cmd.Name = dataType
@@ -280,26 +280,24 @@ func sendAPMTelemetryInternal(data []interface{}, dataType string, wg *sync.Wait
 
 	if rpmResponse == nil {
 		log.Printf("No response received for %s telemetry", dataType)
-		return fmt.Errorf("no response received for telemetry")
+		return *newRPMResponse(fmt.Errorf("no response received"))
 	}
 
 	statusCode := rpmResponse.GetStatusCode()
 	util.Debugf("Status Code for %s telemetry: %d", dataType, statusCode)
 	if err := rpmResponse.GetError(); err != nil {
 		util.Logf("Error in telemetry response for %s: %v", dataType, err)
-		return err
+		return *newRPMResponse(err)
 	}
 
 	durationMetric := time.Since(startTimeMetric)
 	fmt.Printf("Send %v duration: %s\n", dataType, durationMetric)
 
-	return nil
+	return *newRPMResponse(nil)
 }
 
-func SendAPMTelemetry(ctx context.Context, invokedFunctionARN string, payload []byte, conf *config.Configuration, cmd RpmCmd, cs *RpmControls) (error, int) {
+func SendAPMTelemetry(ctx context.Context, payload []byte, conf *config.Configuration, cmd RpmCmd, cs *rpmControls, runId string) (error, int) {
 	util.Debugf("Send APM Telemetry: sending telemetry to New Relic...")
-
-	runID := cs.GetRunId()
 
 	// Decode and decompress payload
 	datav1, datav2, pv, err := GetServerlessData(payload)
@@ -313,7 +311,7 @@ func SendAPMTelemetry(ctx context.Context, invokedFunctionARN string, payload []
 		return err, 0
 	}
 
-	return sendTelemetryData(ctx, telemetryData, runID, cmd, cs)
+	return sendTelemetryData(ctx, telemetryData, runId, cmd, cs)
 }
 
 func extractTelemetryData(datav1 LambdaRawData, datav2 LambdaData, pv int) (struct {
@@ -393,7 +391,7 @@ func sendTelemetryData(ctx context.Context, data struct {
 	CustomEventData	      []interface{}
 	AnalyticEventData     []interface{}
 	TransactionSampleData []interface{}
-}, runID string, cmd RpmCmd, cs *RpmControls) (error, int) {
+}, runID string, cmd RpmCmd, cs *rpmControls) (error, int) {
 	// Define telemetry tasks
 	telemetryTasks := []telemetryType{
 		{data.MetricData, CmdMetrics},
@@ -431,7 +429,7 @@ func sendTelemetryData(ctx context.Context, data struct {
 	return aggregateErrors(errChan)
 }
 
-func sendSingleTelemetry(task telemetryType, wg *sync.WaitGroup, errChan chan<- error, runID string, cmd RpmCmd, cs *RpmControls) {
+func sendSingleTelemetry(task telemetryType, wg *sync.WaitGroup, errChan chan<- error, runID string, cmd RpmCmd, cs *rpmControls) {
 	if len(task.Data) == 0 {
 		util.Debugf("No %s telemetry to send", task.DataType)
 		return
@@ -445,8 +443,8 @@ func sendSingleTelemetry(task telemetryType, wg *sync.WaitGroup, errChan chan<- 
 			wg.Done()
 		}()
 
-		if err := sendAPMTelemetryInternal(task.Data, task.DataType, wg, runID, cmd, cs); err != nil {
-			errChan <- fmt.Errorf("error sending %s telemetry: %w", task.DataType, err)
+		if err := sendAPMTelemetryInternal(task.Data, task.DataType, wg, runID, cmd, cs); err.err != nil {
+			errChan <- fmt.Errorf("error sending %s telemetry: %w", task.DataType, err.GetError())
 		}
 	}()
 }

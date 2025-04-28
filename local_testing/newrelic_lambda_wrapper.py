@@ -20,7 +20,7 @@ from newrelic_lambda.lambda_handler import lambda_handler  # noqa
 
 newrelic.agent.initialize()
 
-
+print("NEW RELIC AGENT INITIALIZED")
 class IOpipeNoOp(object):
     def __call__(self, *args, **kwargs):
         warnings.warn(
