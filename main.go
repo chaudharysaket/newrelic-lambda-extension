@@ -76,7 +76,6 @@ func main() {
 	invocationClient, registrationResponse, err := registrationClient.Register(ctx, regReq)
 	if err != nil {
 		util.Logln("Extension telemetry processing disabled as Extension failed to register with Lambda Runtime API")
-		noopLoop(ctx, invocationClient)
 		return
 	}
 
@@ -94,6 +93,7 @@ func main() {
 	licenseKey, err := credentials.GetNewRelicLicenseKey(ctxLicenseKey, conf)
 	if err != nil {
 		util.Logln("Failed to retrieve New Relic license key", err)
+		noopLoop(ctx, invocationClient)
 		return
 	}
 
