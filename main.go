@@ -75,7 +75,9 @@ func main() {
 
 	invocationClient, registrationResponse, err := registrationClient.Register(ctx, regReq)
 	if err != nil {
-		util.Panic(err)
+		util.Logln("Extension telemetry processing disabled as Extension failed to register with Lambda Runtime API")
+		noopLoop(ctx, invocationClient)
+		return
 	}
 
 	// If extension disabled, go into no op mode
