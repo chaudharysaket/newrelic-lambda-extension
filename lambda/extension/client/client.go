@@ -43,11 +43,15 @@ func New(httpClient http.Client) *RegistrationClient {
 	}
 
 	exeName := filepath.Base(exePath)
+	extensionBaseUrl := os.Getenv(api.LambdaHostPortEnvVar)
+	util.Debugf("Extension name: %v", exeName)
+	util.Debugf("Extension path: %v", exePath)
+	util.Debugf("Extension base URL: %v", extensionBaseUrl)
 
 	return &RegistrationClient{
 		extensionName: exeName,
 		version:       api.Version,
-		baseUrl:       os.Getenv(api.LambdaHostPortEnvVar),
+		baseUrl:       extensionBaseUrl,
 		httpClient:    httpClient,
 	}
 }
