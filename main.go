@@ -94,8 +94,6 @@ func main() {
 	licenseKey, err := credentials.GetNewRelicLicenseKey(ctxLicenseKey, conf)
 	if err != nil {
 		util.Logln("Failed to retrieve New Relic license key", err)
-		// We fail open; telemetry will go to CloudWatch instead
-		noopLoop(ctx, invocationClient)
 		return
 	}
 
