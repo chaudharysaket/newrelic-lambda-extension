@@ -1,3 +1,6 @@
+BUILD_INFO_IMPORT_PATH=main
+NEW_RELIC_VERSION=0.0.0
+
 build: clean
 	go build -o ./extensions/newrelic-lambda-extension
 
@@ -8,11 +11,11 @@ clean:
 	rm -f /tmp/newrelic-lambda-extension.arm64.zip
 
 dist-x86_64: clean
-	env GOARCH=amd64 GOOS=linux CGO_ENABLED=0 go build -ldflags="-s -w" -o ./extensions/newrelic-lambda-extension
+	env GOARCH=amd64 GOOS=linux CGO_ENABLED=0 go build -ldflags="-s -w -X $(BUILD_INFO_IMPORT_PATH).Version=$(NEW_RELIC_VERSION)" -o ./extensions/newrelic-lambda-extension
 	touch preview-extensions-ggqizro707
 
 dist-arm64: clean
-	env GOARCH=arm64 GOOS=linux CGO_ENABLED=0 go build -ldflags="-s -w" -o ./extensions/newrelic-lambda-extension
+	env GOARCH=arm64 GOOS=linux go build -ldflags="-s -w -X $(BUILD_INFO_IMPORT_PATH).Version=$(NEW_RELIC_VERSION)" -o ./extensions/newrelic-lambda-extension
 	touch preview-extensions-ggqizro707
 
 zip-x86_64: dist-x86_64
