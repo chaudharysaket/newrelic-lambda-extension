@@ -1,0 +1,85 @@
+#!/bin/bash
+
+set -ef -o pipefail
+
+# Copyright The OpenTelemetry Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+: <<'END_DOCUMENTATION'
+`otel-instrument`
+
+This script configures and sets up OpenTelemetry Python with the values we
+expect will be used by the common user. It does this by setting the environment
+variables OpenTelemetry uses, and then initializing OpenTelemetry using the
+`opentelemetry-instrument` auto instrumentation script from the
+`opentelemetry-instrumentation` package.
+
+Additionally, this configuration assumes the user is using packages conforming
+to the `opentelemetry-instrumentation` and `opentelemetry-sdk` specifications.
+
+DO NOT use this script for anything else besides SETTING ENVIRONMENT VARIABLES.
+
+See more:
+https://docs.aws.amazon.com/lambda/latest/dg/runtimes-modify.html#runtime-wrapper
+
+Usage
+-----
+We expect this file to be at the root of a Lambda Layer. Having it anywhere else
+seems to mean AWS Lambda cannot find it.
+
+In the configuration of an AWS Lambda function with this file at the
+root level of a Lambda Layer:
+
+.. code::
+
+    AWS_LAMBDA_EXEC_WRAPPER = /opt/otel-instrument
+
+END_DOCUMENTATION
+
+# Use constants to access the environment variables we want to use in this
+# script.
+
+# See more:
+# https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars.html#configuration-envvars-runtime
+
+# - Reserved environment variables
+
+# - - $AWS_LAMBDA_FUNCTION_NAME
+# - - $LAMBDA_RUNTIME_DIR
+
+# - Unreserved environment variables
+
+# - - $PYTHONPATH
+
+# Update the python paths for packages with `sys.path` and `PYTHONPATH`
+
+# - We know that the path to the Lambda Layer OpenTelemetry Python packages are
+#   well defined, so we can add them to the PYTHONPATH.
+#
+#   See more:
+#   https://docs.aws.amazon.com/lambda/latest/dg/configuration-layers.html#configuration-layers-path
+
+echo "DEBUG: Contents of /opt/python/lib/python3.12/site-packages/bin/ are:"
+ls -la /opt/python/lib/python3.12/site-packages/bin/
+
+export ORIG_HANDLER=$_HANDLER;
+export _HANDLER="newrelic_lambda_wrapper.handler";
+export NEW_RELIC_SERVERLESS_MODE_ENABLED="true";
+# - Call the upstream auto instrumentation script
+export NEW_RELIC_APP_NAME="${NEW_RELIC_APP_NAME:-$AWS_LAMBDA_FUNCTION_NAME}"
+export NEW_RELIC_NO_CONFIG_FILE="true";
+export NEW_RELIC_DISTRIBUTED_TRACING_ENABLED="true";
+export NEW_RELIC_PACKAGE_REPORTING_ENABLED="false";
+export PYTHONPATH="/opt/python/lib/python3.12/site-packages:$PYTHONPATH";
+exec python3 /opt/python/lib/python3.12/site-packages/bin/newrelic-admin run-program "$@"
