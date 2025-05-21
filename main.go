@@ -166,7 +166,7 @@ func main() {
 	}()
 
 	// Call next, and process telemetry, until we're shut down
-	eventCounter := mainLoop(ctx, invocationClient, batch, telemetryChan, logServer, conf, telemetryClient)
+	eventCounter := mainLoop(ctx, invocationClient, batch, telemetryChan, logServer, telemetryClient, extensionStartup)
 
 	util.Logf("New Relic Extension shutting down after %v events\n", eventCounter)
 	if conf.APMLambdaMode {
@@ -205,7 +205,7 @@ func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryC
 }
 
 // mainLoop repeatedly calls the /next api, and processes telemetry and platform logs. The timing is rather complicated.
-func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, batch *telemetry.Batch, telemetryChan chan []byte, logServer *logserver.LogServer, conf *config.Configuration, telemetryClient *telemetry.Client) int {
+func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, batch *telemetry.Batch, telemetryChan chan []byte, logServer *logserver.LogServer, telemetryClient *telemetry.Client, extensionStartup time.Time) int {
 	eventCounter := 0
 	probablyTimeout := false
 	apmCmd := apm.RpmCmd{}
@@ -248,63 +248,33 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 				// timed out, this will catch us up to the current state of telemetry, allowing us to resume.
 				select {
 				case telemetryBytes := <-telemetryChan:
-					if conf.APMLambdaMode {
-						shipAPMHarvest(ctx, telemetryBytes, conf, apmCmd, apmControls)
-					} else {
-						// We received telemetry
-						util.Debugf("Agent telemetry bytes: %s", base64.URLEncoding.EncodeToString(telemetryBytes))
-						batch.AddTelemetry(lastRequestId, telemetryBytes)
-						util.Logf("We suspected a timeout for request %s but got telemetry anyway", lastRequestId)
-					}
+					// We received telemetry
+					util.Debugf("Agent telemetry bytes: %s", base64.URLEncoding.EncodeToString(telemetryBytes))
+					batch.AddTelemetry(lastRequestId, telemetryBytes, true)
+					util.Logf("We suspected a timeout for request %s but got telemetry anyway", lastRequestId)
 				default:
 				}
 			}
 
 			if event.EventType == api.Shutdown {
-				if conf.APMLambdaMode {
-					if event.ShutdownReason == api.Timeout {
-						timeoutSecs := eventStart.Sub(lastEventStart).Seconds()
-						errorMessage := fmt.Sprintf(
-							"Task timed out after %.2f seconds",
-							timeoutSecs,
-						)
-						apm.SendErrorEvent(apmCmd, apmControls, []interface{}{"Lambda.Timedout", 
-																			fmt.Sprintf("%f", timeoutSecs), 
-																			lastRequestId, 
-																			errorMessage,
-																			LambdaFunctionName, 
-																			LambdaAccountId, 
-																			LambdaFunctionVersion})
-					} else if event.ShutdownReason == api.Failure {
-						errorMessage := fmt.Sprintf("RequestId: %s AWS Lambda platform fault caused a shutdown", lastRequestId)
-						timeoutSecs := eventStart.Sub(lastEventStart).Seconds()
-						apm.SendErrorEvent(apmCmd, apmControls, []interface{}{"Lambda.PlatformFault", 
-																			fmt.Sprintf("%f", timeoutSecs), 
-																			lastRequestId, 
-																			errorMessage,
-																			LambdaFunctionName, 
-																			LambdaAccountId, 
-																			LambdaFunctionVersion})
+				if event.ShutdownReason == api.Timeout && lastRequestId != "" {
+					// Synthesize the timeout error message that the platform produces, and LLC parses
+					if lastEventStart.IsZero() {
+						lastEventStart = extensionStartup.UTC()
 					}
-				} else {
-					if event.ShutdownReason == api.Timeout && lastRequestId != "" {
-						// Synthesize the timeout error message that the platform produces, and LLC parses
-						timestamp := eventStart.UTC()
-						timeoutSecs := eventStart.Sub(lastEventStart).Seconds()
-						timeoutMessage := fmt.Sprintf(
-							"%s %s Task timed out after %.2f seconds",
-							timestamp.Format(time.RFC3339),
-							lastRequestId,
-							timeoutSecs,
-						)
-
-						batch.AddTelemetry(lastRequestId, []byte(timeoutMessage))
-
-					} else if event.ShutdownReason == api.Failure && lastRequestId != "" {
-						// Synthesize a generic platform error. Probably an OOM, though it could be any runtime crash.
-						errorMessage := fmt.Sprintf("RequestId: %s AWS Lambda platform fault caused a shutdown", lastRequestId)
-						batch.AddTelemetry(lastRequestId, []byte(errorMessage))
-					}
+					timestamp := eventStart.UTC()
+					timeoutSecs := eventStart.Sub(lastEventStart).Seconds()
+					timeoutMessage := fmt.Sprintf(
+						"%s %s Task timed out after %.2f seconds",
+						timestamp.Format(time.RFC3339),
+						lastRequestId,
+						timeoutSecs,
+					)
+					batch.AddTelemetry(lastRequestId, []byte(timeoutMessage), false)
+				} else if event.ShutdownReason == api.Failure && lastRequestId != "" {
+					// Synthesize a generic platform error. Probably an OOM, though it could be any runtime crash.
+					errorMessage := fmt.Sprintf("RequestId: %s AWS Lambda platform fault caused a shutdown", lastRequestId)
+					batch.AddTelemetry(lastRequestId, []byte(errorMessage), false)
 				}
 
 				return eventCounter
@@ -348,22 +318,18 @@ func mainLoop(ctx context.Context, invocationClient *client.InvocationClient, ba
 				continue
 			case telemetryBytes := <-telemetryChan:
 				timeLimitCancel()
-				if conf.APMLambdaMode {
-					pollLogAPMServer(logServer, conf)
-					shipAPMHarvest(ctx, telemetryBytes, conf, apmCmd, apmControls)
-				} else {
-					// We received telemetry
-					util.Debugf("Agent telemetry bytes: %s", base64.URLEncoding.EncodeToString(telemetryBytes))
-					inv := batch.AddTelemetry(lastRequestId, telemetryBytes)
-					if inv == nil {
-						util.Logf("Failed to add telemetry for request %v", lastRequestId)
-					}
-					// Opportunity for an aggressive harvest, in which case, we definitely want to wait for the HTTP POST
-					// to complete. Mostly, nothing really happens here.
-					pollLogServer(logServer, batch)
-					shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient)
+
+				// We received telemetry
+				util.Debugf("Agent telemetry bytes: %s", base64.URLEncoding.EncodeToString(telemetryBytes))
+				inv := batch.AddTelemetry(lastRequestId, telemetryBytes, true)
+				if inv == nil {
+					util.Logf("Failed to add telemetry for request %v", lastRequestId)
 				}
-				
+
+				// Opportunity for an aggressive harvest, in which case, we definitely want to wait for the HTTP POST
+				// to complete. Mostly, nothing really happens here.
+				pollLogServer(logServer, batch)
+				shipHarvest(ctx, batch.Harvest(time.Now()), telemetryClient)
 			}
 
 			lastEventStart = eventStart
@@ -390,7 +356,7 @@ func pollLogAPMServer(logServer *logserver.LogServer, conf *config.Configuration
 // pollLogServer polls for platform logs, and annotates telemetry
 func pollLogServer(logServer *logserver.LogServer, batch *telemetry.Batch) {
 	for _, platformLog := range logServer.PollPlatformChannel() {
-		inv := batch.AddTelemetry(platformLog.RequestID, platformLog.Content)
+		inv := batch.AddTelemetry(platformLog.RequestID, platformLog.Content, false)
 		if inv == nil {
 			util.Debugf("Skipping platform log for request %v", platformLog.RequestID)
 		}
