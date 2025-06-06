@@ -120,7 +120,7 @@ func getUtilizationData(cmd RpmCmd) map[string]interface{} {
 	return utilizationData
 }
 
-type NRAgent string
+
 type LambdaRuntime string
 
 var (
@@ -128,15 +128,6 @@ var (
 	PythonLambda  	LambdaRuntime = "python"
 	DefaultLambda	LambdaRuntime = "go" 
 	runtimeLookupPath     = "/var/lang/bin"
-)
-
-var (
-	Node 	NRAgent = "nodejs"
-	Python 	NRAgent = "python"
-	Go 		NRAgent = "go"
-	Dotnet 	NRAgent = "dotnet"
-	Ruby   	NRAgent = "ruby"
-	Java 	NRAgent = "java"
 )
 
 var LambdaRuntimes = []LambdaRuntime{NodeLambda, PythonLambda}
@@ -154,7 +145,7 @@ func checkRuntime() (LambdaRuntime) {
 func getAgentVersion(runtime string) (string, error) {
 	var layerAgentPaths []string
 	var agentVersionFile string
-	if runtime == "nodejs" {
+	if runtime == "node" {
 		layerAgentPaths = checks.LayerAgentPathNode
 		agentVersionFile = "package.json"
 	} else if runtime == "python" {
