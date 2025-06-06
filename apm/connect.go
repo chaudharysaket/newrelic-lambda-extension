@@ -142,7 +142,7 @@ func checkRuntime() (LambdaRuntime) {
 	return DefaultLambda
 }
 
-func getAgentVersion(runtime string) (string, error) {
+func getAgentVersion(runtime string) (string, string, error) {
 	var layerAgentPaths []string
 	var agentVersionFile string
 	if runtime == "node" {
@@ -161,27 +161,27 @@ func getAgentVersion(runtime string) (string, error) {
 
 		b, err := os.ReadFile(f)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		if runtime == "python" {
-			return string(b), nil
+			return "python", string(b), nil
 		} else {
 			v := checks.LayerAgentVersion{}
 			err = json.Unmarshal([]byte(b), &v)
 			if err != nil {
-				return "", err
+				return "", "", err
 			}
-			return v.Version, nil
+			return "nodejs", v.Version, nil
 		}
 	}
 
-	return "", fmt.Errorf("agent version file not found in layer paths: %v", layerAgentPaths)
+	return "", "", fmt.Errorf("agent version file not found in layer paths: %v", layerAgentPaths)
 }
 
 func Connect(cmd RpmCmd, cs *RpmControls) (string, string, error) {
 	runtimeLanguage := checkRuntime()
-	NRAgentVersion, err := getAgentVersion(string(runtimeLanguage))
+	NRAgentLanguage, NRAgentVersion, err := getAgentVersion(string(runtimeLanguage))
 	if err != nil {
 		NRAgentVersion = "unknown"
 	}
@@ -193,7 +193,7 @@ func Connect(cmd RpmCmd, cs *RpmControls) (string, string, error) {
 	data := []map[string]interface{}{
 		{
 			"pid":           pid,
-			"language":      runtimeLanguage,
+			"language":      NRAgentLanguage,
 			"agent_version": NRAgentVersion,
 			"host":          "AWS Lambda",
 			"app_name":      []string{appName},
@@ -204,7 +204,7 @@ func Connect(cmd RpmCmd, cs *RpmControls) (string, string, error) {
 	marshaledData, err := json.Marshal(data)
 	util.Debugf("APM Connect Call for runtime %s: %s\n", string(runtimeLanguage), string(marshaledData))
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal connect data: %w", err)
+		util.Fatal(fmt.Errorf("Extension shutdown: failed to perform APM connect: %w", err))
 	}
 	cmd.Data = marshaledData
 	cmd.Name = cmdConnect
