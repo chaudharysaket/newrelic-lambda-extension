@@ -90,6 +90,11 @@ func (resp rpmResponse) IsDisconnect() bool {
 	return resp.statusCode == 410 
 }
 
+func (resp rpmResponse) IsRestartException() bool {
+	return resp.statusCode == 401 ||
+		resp.statusCode == 409
+}
+
 
 func SetEntityGuid(entityGuid string) {
 	mutex.Lock() 

@@ -3,6 +3,7 @@ package apm
 import (
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -12,8 +13,8 @@ import (
 	"github.com/newrelic/newrelic-lambda-extension/util"
 )
 
-type appData struct {
-	data []byte
+type harvest struct {
+	data [][]byte
 }
 
 type apmConfig struct {
@@ -25,9 +26,14 @@ type apmConfig struct {
 	LambdaAccountId string
 }
 
+type harvestable interface {
+	MergeIntoHarvest(h *harvest)
+}
+
 type InternalAPMApp struct {
 	rpmControls    rpmControls
 	apmConfig      apmConfig
+	apmHarvest     *harvest
 
 	initiateShutdown chan time.Duration
 	shutdownStarted  chan struct{}
@@ -37,14 +43,14 @@ type InternalAPMApp struct {
 	ErrorEventChan	   chan interface{}
 	collectorErrorChan chan rpmResponse
 	connectChan        chan *appRun
-	
+	LambdaLogChan      chan string
 
 	// This mutex protects both `run` and `err`, both of which should only
 	// be accessed using getState and setState.
 	sync.RWMutex
 	// run is non-nil when the app is successfully connected.  It is
 	// immutable.
-	run *appRun
+	Run *appRun
 	// err is non-nil if the application will never be connected again
 	// (disconnect, license exception, shutdown).
 	err error
@@ -65,11 +71,11 @@ func NewApp(ctx context.Context ,c *config.Configuration, LambdaFunctionName str
 		connectChan:        make(chan *appRun, 1),
 		collectorErrorChan: make(chan rpmResponse, 1),
 		DataChan:           make(chan []byte, 1),
+		LambdaLogChan:      make(chan string, 1),
 		rpmControls: rpmControls{
 			License: c.LicenseKey,
 			Client: &http.Client{
-				Transport: collectorDefaultTransport,
-				Timeout:   collectorTimeout,
+				Timeout: 1000 * time.Second,
 			},
 			GzipWriterPool: &sync.Pool{
 				New: func() interface{} {
@@ -117,10 +123,12 @@ func (app *InternalAPMApp) connectAttempt() (*ConnectReply, *rpmResponse) {
 
 func (app *InternalAPMApp) connectRoutine() {
 	attempts := 0
-	for {
-		reply, _ := app.connectAttempt()
+	maxAttempts := 3
+
+	for attempts < maxAttempts {
+		reply, resp := app.connectAttempt()
 		if reply != nil {
-			util.Debugf("Connect successful in attempt %d", attempts)
+			util.Debugf("Connect successful in attempt %d", attempts+1)
 
 			select {
 			case app.connectChan <- newAppRun(app.apmConfig, reply):
@@ -129,22 +137,25 @@ func (app *InternalAPMApp) connectRoutine() {
 			return
 		}
 
-		// if resp.IsDisconnect() {
-		// 	select {
-		// 	case app.collectorErrorChan <- *resp:
-		// 	case <-app.shutdownStarted:
-		// 	}
-		// 	return
-		// }
+		if resp.IsDisconnect() {
+			select {
+			case app.collectorErrorChan <- *resp:
+			case <-app.shutdownStarted:
+			}
+			return
+		}
 
-		// if nil != resp.GetError() {
-		// 	util.Debugf("Error connecting to collector: %v", resp.GetError())
-		// }
+		if nil != resp.GetError() {
+			util.Debugf("Error connecting to collector: %v", resp.GetError())
+		}
 
-		// backoff := getConnectBackoffTime(attempts)
-		// time.Sleep(time.Duration(backoff) * time.Second)
-		// attempts++
+		backoff := getConnectBackoffTime(attempts)
+		time.Sleep(time.Duration(backoff) * time.Second)
+		attempts++
 	}
+
+	util.Debugf("Exceeded maximum connection attempts.")
+	util.Fatal(fmt.Errorf("failed to connect to collector after %d attempts", maxAttempts))
 }
 
 func getConnectBackoffTime(attempt int) int {
@@ -160,7 +171,7 @@ func (app *InternalAPMApp) setState(run *appRun, err error) {
 	app.Lock()
 	defer app.Unlock()
 
-	app.run = run
+	app.Run = run
 	app.err = err
 }
 
@@ -197,23 +208,36 @@ func (app *InternalAPMApp) process(ctx context.Context) {
 	for {
 		select {
 		case data := <-app.DataChan:
-			if run != nil {
+			if nil != run && run.Reply.RunID != "" {
 				util.Debugf("Received data in DataChan with length: %d", len(data))
-				// Log the data for debugging
-				util.Debugf("DataChan Data: %s", string(data))
 				go app.doHarvest(ctx, data, run)
+				if app.apmHarvest != nil {
+					util.Debugf("Harvesting data from DataChan")
+					for _, harvestableData := range app.apmHarvest.data {
+						util.Debugf("Harvesting data: %s", string(harvestableData))
+						go app.doHarvest(ctx, harvestableData, run)
+					}
+				}
 			} else {
-				util.Debugf("Received data in DataChan but no run available")
+				util.Debugf("Received data in DataChan but runId not available, saving data for later")
+				app.apmHarvest.data = append(app.apmHarvest.data, data)
 			}
-		case err := <-app.collectorErrorChan:
-			util.Debugf("Received error in CollectorErrorChan: %v", err)
-			// harvest 
+		case resp := <-app.collectorErrorChan:
+			util.Debugf("Received error in CollectorErrorChan: %v", resp)
+			app.setState(nil, nil)
+			if resp.IsDisconnect() {
+				util.Fatal(fmt.Errorf("collector disconnected: %v", resp.GetError()))
+			} else if resp.IsRestartException() {
+				util.Debugf("Received restart exception, resetting app state")
+				go app.connectRoutine()
+			}
 		case <-app.shutdownStarted:
 			util.Debugf("Shutdown started")
 			return
 		case run = <-app.connectChan:
 			util.Debugf("Received run in ConnectChan and setting app state")
 			app.setState(run, nil)
+			app.LambdaLogChan <- run.Reply.EntityGUID
 		case <-app.ErrorEventChan:
 			util.Debugf("Received error event in ErrorEventChan")
 		}

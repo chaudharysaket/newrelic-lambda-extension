@@ -33,6 +33,11 @@ var (
 	LambdaFunctionVersion string
 )
 
+var (
+	entityGuid string
+    entityLock sync.RWMutex
+)
+
 func init() {
 	rootCtx = context.Background()
 }
@@ -148,7 +153,7 @@ func main() {
 
 	// Run startup checks
 	go func() {
-		if conf.IgnoreExtensionChecks["all"] && conf.APMLambdaMode{
+		if conf.IgnoreExtensionChecks["all"] || conf.APMLambdaMode{
 			// Ignore extension checks in APM Mode
 			util.Debugf("Ignoring all extension checks")
 			return
@@ -161,21 +166,29 @@ func main() {
 	backgroundTasks.Add(1)
 
 	go func() {
-		defer backgroundTasks.Done()
-		logShipLoop(ctx, logServer, telemetryClient, conf.APMLambdaMode)
+		if !conf.APMLambdaMode {
+			logShipLoop(ctx, logServer, telemetryClient, conf.APMLambdaMode)
+		}
 	}()
+
 	eventCounter := 0
 	// Call next, and process telemetry, until we're shut down
+	var internalAPMApp *apm.InternalAPMApp
 	if conf.APMLambdaMode {
-		internalAPMApp := apm.NewApp(ctx, conf, LambdaFunctionName, LambdaAccountId, LambdaFunctionVersion)
+		internalAPMApp = apm.NewApp(ctx, conf, LambdaFunctionName, LambdaAccountId, LambdaFunctionVersion)
+		go APMlogShipLoop(ctx, logServer, telemetryClient, internalAPMApp)
+		go getAPMEntityGUID(ctx, internalAPMApp, internalAPMApp.LambdaLogChan)
 		eventCounter = mainAPMLoop(ctx, invocationClient, telemetryChan, logServer, conf, internalAPMApp)
 	} else {
 		eventCounter = mainLoop(ctx, invocationClient, batch, telemetryChan, logServer, telemetryClient, extensionStartup)
 	}
 
+	
+
+
 	util.Logf("New Relic Extension shutting down after %v events\n", eventCounter)
 	if conf.APMLambdaMode {
-		pollLogAPMServer(logServer, conf)
+		pollLogAPMServer(ctx, logServer, conf)
 	} else {
 		pollLogServer(logServer, batch)
 	}
@@ -195,6 +208,76 @@ func main() {
 	util.Logf("Extension shutdown after %vms", ranFor.Milliseconds())
 }
 
+func getAPMEntityGUID(ctx context.Context, internalAPMApp *apm.InternalAPMApp, waitChannel chan string) {
+	util.Debugf("Waiting for APM EntityGUID...")
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if internalAPMApp.Run != nil && internalAPMApp.Run.Reply != nil {
+			if internalAPMApp.Run.Reply.EntityGUID != "" {
+				entityLock.Lock()
+				entityGuid = internalAPMApp.Run.Reply.EntityGUID
+				entityLock.Unlock()
+				util.Debugf("EntityGUID received: %s", entityGuid)
+				return
+			} else {
+				util.Debugf("Awaiting EntityGUID through channel")
+			}
+		} else {
+			util.Debugf("Run or Reply not yet initialized")
+		}
+
+		select {
+		case <-waitChannel:
+			if internalAPMApp.Run != nil && internalAPMApp.Run.Reply != nil {
+				entityLock.Lock()
+				entityGuid = internalAPMApp.Run.Reply.EntityGUID
+				entityLock.Unlock()
+				util.Debugf("Entity received after channel communication, GUID: %s", entityGuid)
+				return
+			}
+		case <-ticker.C:
+			// Continue loop until context times out or is canceled
+		case <-ctx.Done():
+			util.Debugf("Context cancelled or timed out: %v", ctx.Err())
+			return
+		}
+	}
+}
+
+func APMlogShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryClient *telemetry.Client, internalAPMApp *apm.InternalAPMApp) {
+	GetEntityLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				util.Debugf("Polling logs context canceled or timed out.")
+				return
+			default:
+				entityLock.RLock()
+				guid := entityGuid
+				entityLock.RUnlock()
+				if guid != "" {
+					util.Debugf("Entity GUID obtained: %s", guid)
+					break GetEntityLoop
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
+	for {
+		functionLogs, more := logServer.AwaitFunctionLogs()
+		if !more {
+			return
+		}
+		err := telemetryClient.SendFunctionLogs(ctx, invokedFunctionARN, functionLogs, entityGuid)
+		if err != nil {
+			util.Logf("Failed to send %d function logs", len(functionLogs))
+		}
+	}
+}
+
 // logShipLoop ships function logs to New Relic as they arrive.
 func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryClient *telemetry.Client, isAPMLambdaMode bool) {
 	for {
@@ -202,7 +285,7 @@ func logShipLoop(ctx context.Context, logServer *logserver.LogServer, telemetryC
 		if !more {
 			return
 		}
-		err := telemetryClient.SendFunctionLogs(ctx, invokedFunctionARN, functionLogs, isAPMLambdaMode)
+		err := telemetryClient.SendFunctionLogs(ctx, invokedFunctionARN, functionLogs, "")
 		if err != nil {
 			util.Logf("Failed to send %d function logs", len(functionLogs))
 		}
@@ -409,7 +492,7 @@ func mainAPMLoop(ctx context.Context, invocationClient *client.InvocationClient,
 			// Set the timeout timer for a smidge before the actual timeout; we can recover from false timeouts.
 			timeoutWatchBegins := 200 * time.Millisecond
 			timeLimitContext, timeLimitCancel := context.WithDeadline(ctx, timeoutInstant.Add(-timeoutWatchBegins))
-			pollLogAPMServer(logServer, conf)
+			pollLogAPMServer(ctx, logServer, conf)
 			select {
 			case <-timeLimitContext.Done():
 				timeLimitCancel()
@@ -427,10 +510,25 @@ func mainAPMLoop(ctx context.Context, invocationClient *client.InvocationClient,
 }
 
 // pollLogAPMServer polls for platform logs, and send as APM telemetry
-func pollLogAPMServer(logServer *logserver.LogServer, conf *config.Configuration) {
-	
-	util.Debugf("pollLogAPMServer: polling for platform logs")
-	entityGuid := "MTAxOTYwODR8QVBNfEFQUExJQ0FUSU9OfDIyMjc1Mzc2Mg"
+func pollLogAPMServer(ctx context.Context, logServer *logserver.LogServer, conf *config.Configuration) {
+	GetEntityLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				util.Debugf("pollLogAPMServer context canceled or timed out.")
+				return
+			default:
+				entityLock.RLock()
+				guid := entityGuid
+				entityLock.RUnlock()
+				if guid != "" {
+					util.Debugf("Entity GUID obtained: %s", guid)
+					break GetEntityLoop
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
 	for _, platformLog := range logServer.PollPlatformChannel() {
 		lambdaMetrics, _ := apm.ParseLambdaReportLog(string(platformLog.Content))
 		metrics := lambdaMetrics.ConvertToMetrics("apm.lambda.transaction", entityGuid, LambdaFunctionName)
@@ -441,6 +539,7 @@ func pollLogAPMServer(logServer *logserver.LogServer, conf *config.Configuration
 		util.Logf("Response Status: %d\n", statusCode)
 		util.Logf("Response Body: %s\n", responseBody)
 	}
+
 }
 
 // pollLogServer polls for platform logs, and annotates telemetry
